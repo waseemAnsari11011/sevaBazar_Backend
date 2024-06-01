@@ -4,12 +4,10 @@ const bcrypt = require('bcrypt');
 
 // Define the schema
 const vendorSchema = new Schema({
-  username: {
+  name: {
     type: String,
-    required: true,
-    unique: true
   },
-  passwordHash: {
+  password: {
     type: String,
     required: true
   },
@@ -21,7 +19,6 @@ const vendorSchema = new Schema({
   vendorInfo: {
     businessName: {
       type: String,
-      required: true
     },
     contactNumber: {
       type: String,
@@ -30,31 +27,30 @@ const vendorSchema = new Schema({
     address: {
       addressLine1: {
         type: String,
-        required: true
       },
       addressLine2: String,
       city: {
         type: String,
-        required: true
       },
       state: {
         type: String,
-        required: true
       },
       country: {
         type: String,
-        required: true
       },
       postalCode: {
         type: String,
-        required: true
       }
     }
   },
-  availableLocalities: [{
+  role: {
     type: String,
-    required: true
-  }],
+    default: 'vendor'
+  },
+  isRestricted: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -66,9 +62,9 @@ const vendorSchema = new Schema({
 });
 
 // Method to compare passwords
-vendorSchema.methods.comparePassword = async function(candidatePassword) {
+vendorSchema.methods.comparePassword = async function (candidatePassword) {
   console.log("candidatePassword", candidatePassword)
-  return bcrypt.compare(candidatePassword, this.passwordHash);
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
 // Create the model

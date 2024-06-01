@@ -3,7 +3,13 @@ const router = express.Router();
 const customerController = require('./controller');
 
 // Route to create a new customer
-router.post('/customers', customerController.createCustomer);
+router.post('/customers/signup', customerController.createCustomer);
+
+// Route for customers login
+router.post('/customers/login', customerController.customerLogin);
+
+// send otp test
+router.post('/send-otp', customerController.sendOtp);
 
 // Route to get all customers
 router.get('/customers', customerController.getAllCustomers);
