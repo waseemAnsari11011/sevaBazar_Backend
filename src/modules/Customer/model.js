@@ -5,40 +5,35 @@ const Schema = mongoose.Schema;
 const customerSchema = new Schema({
   password: {
     type: String,
-    required: true
   },
   email: {
     type: String,
-    required: true,
     unique: true
   },
   contactNumber: {
     type: String,
     required: true
   },
-  shippingAddresses: [
-    {
-      addressLine1: {
-        type: String,
-      },
-      addressLine2: String,
-      city: {
-        type: String,
-      },
-      state: {
-        type: String,
-      },
-      country: {
-        type: String,
-      },
-      postalCode: {
-        type: String,
-      }
+  shippingAddresses: {
+    address: {
+      type: String,
+    },
+    city: {
+      type: String,
+    },
+    state: {
+      type: String,
+    },
+    country: {
+      type: String,
+    },
+    postalCode: {
+      type: String,
     }
-  ],
+  }
+  ,
   availableLocalities: {
     type: String,
-    required: true
   },
   role: {
     type: String,
