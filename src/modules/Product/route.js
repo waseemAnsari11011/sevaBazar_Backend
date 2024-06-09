@@ -30,6 +30,8 @@ router.post('/products', upload, productController.addProduct);
 router.put('/products/:id',upload, productController.updateProduct);
 router.delete('/products/:id', productController.deleteProduct);
 router.get('/products', productController.getAllProducts);
+router.get('/products-low-quantity/:vendorId', productController.getProductsLowQuantity);
+
 router.get('/products/:id', productController.getProductById);
 
 router.get('/categories/:id/products', productController.getProductsByCategoryId);

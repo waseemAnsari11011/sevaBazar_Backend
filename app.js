@@ -8,6 +8,9 @@ const vendorRoutes = require('./src/modules/Vendor/route'); // Adjust the path a
 const ProductRoutes = require('./src/modules/Product/route');
 const CategoryRoutes = require('./src/modules/Category/route');
 const OrderRoutes = require('./src/modules/Order/route');
+const ReportRoutes = require('./src/modules/Reports/route');
+const InquiryRoutes = require('./src/modules/Inquiry/route');
+
 
 const app = express();
 app.use(cors());
@@ -33,6 +36,8 @@ app.use(vendorRoutes);
 app.use(ProductRoutes);
 app.use(CategoryRoutes);
 app.use(OrderRoutes);
+app.use(ReportRoutes);
+app.use(InquiryRoutes)
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);

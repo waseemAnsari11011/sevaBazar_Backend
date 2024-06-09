@@ -1,8 +1,18 @@
 const Order = require('../Order/model');  // Adjust the path according to your project structure
 const Product = require('../Product/model');
 const mongoose = require('mongoose');
+const Razorpay = require('razorpay');
+const crypto = require('crypto');
 
-exports.createOrder = async (req, res) => {
+//razorpay
+const razorpay = new Razorpay({
+    key_id: 'rzp_test_nEIzO6bfk1HLkL',
+    key_secret: 'X9T9NWRdX0xSE9U2O0Kk1sHI'
+});
+
+exports.createOrderRazorpay = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
         const { customer, vendors, shippingAddress } = req.body;
 
@@ -11,24 +21,17 @@ exports.createOrder = async (req, res) => {
             return res.status(400).json({ error: 'All required fields must be provided' });
         }
 
-
         // Validate each vendor and their products
         for (const vendor of vendors) {
             if (!vendor.vendor || !vendor.products) {
                 return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
             }
             for (const product of vendor.products) {
-
                 if (!product.product || !product.quantity || !product.price) {
                     return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
                 }
             }
         }
-
-        console.log("vendors--->>>", customer,
-            vendors,
-            shippingAddress)
-
 
         // Create a new order instance
         const newOrder = new Order({
@@ -40,12 +43,202 @@ exports.createOrder = async (req, res) => {
         // Save the order to the database
         const savedOrder = await newOrder.save();
 
-        res.status(201).json(savedOrder);
+        // Calculate total amount for the order
+        let totalAmount = 0;
+        savedOrder.vendors.forEach(vendor => {
+            vendor.products.forEach(product => {
+                totalAmount += product.totalAmount;
+            });
+        });
+
+        // Update product quantities and save the order to the database
+        for (const vendor of vendors) {
+            for (const productInfo of vendor.products) {
+                const product = await Product.findById(productInfo.product);
+                if (!product) {
+                    throw new Error(`Product with ID ${productInfo.product} not found`);
+                }
+                if (product.quantity < productInfo.quantity) {
+                    throw new Error(`Not enough quantity available for product ${product.name}`);
+                }
+                product.quantity -= productInfo.quantity;
+                await product.save();
+            }
+        }
+
+        // Create Razorpay order
+        const options = {
+            amount: totalAmount * 100, // Amount in paisa
+            currency: 'INR',
+            receipt: savedOrder._id.toString()
+        };
+        const razorpayOrder = await razorpay.orders.create(options);
+
+        await session.commitTransaction();
+        session.endSession();
+
+        // Send response with order details and Razorpay order
+        res.status(201).json({
+            order: savedOrder,
+            razorpayOrder
+        });
     } catch (error) {
-        console.log("error", error);
+        await session.abortTransaction();
+        session.endSession();
+        console.error("error--->>", error)
         res.status(400).json({ error: error.message });
     }
 };
+
+
+exports.updatePaymentStatus = async (req, res) => {
+    try {
+        console.log("updatePaymentStatus")
+        // Extract required fields from the request body
+        const { orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+
+        // Ensure all required fields are present
+        if (!orderId || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Find the order in the database using the orderId
+        const order = await Order.findById(orderId);
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Create a hmac object using the key_secret
+        const hmac = crypto.createHmac('sha256', razorpay.key_secret);
+
+        // Generate the expected signature
+        hmac.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+        const generated_signature = hmac.digest('hex');
+
+        // Verify the signature
+        if (generated_signature === razorpay_signature) {
+            // Update the order status to reflect successful payment
+            order.isPaymentVerified = true;
+            order.paymentStatus = 'Paid';
+            order.razorpay_payment_id = razorpay_payment_id;
+            order.razorpay_order_id = razorpay_order_id;
+            order.razorpay_signature = razorpay_signature;
+        } else {
+            // Update the order status to reflect failed payment
+            order.isPaymentVerified = false;
+            order.paymentStatus = 'Unpaid';
+        }
+
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        res.status(200).json(updatedOrder);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+exports.updatePaymentStatusManually = async (req, res) => {
+    try {
+        console.log("updatePaymentStatus")
+        // Extract required fields from the request body
+        const { orderId, newStatus } = req.body;
+
+        // Ensure all required fields are present
+        if (!newStatus || !orderId) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Find the order in the database using the orderId
+        let order = await Order.findById(orderId);
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (newStatus === 'Paid') {
+            order.isPaymentVerified = true;
+            order.paymentStatus = 'Paid';
+        } else {
+            order.isPaymentVerified = false;
+            order.paymentStatus = 'Unpaid';
+        }
+
+
+
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        res.status(200).json(updatedOrder);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+
+//
+
+exports.createOrder = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+        const { customer, vendors, shippingAddress } = req.body;
+
+        // Validate required fields
+        if (!customer || !vendors || !shippingAddress) {
+            return res.status(400).json({ error: 'All required fields must be provided' });
+        }
+
+        // Validate each vendor and their products
+        for (const vendor of vendors) {
+            if (!vendor.vendor || !vendor.products) {
+                return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
+            }
+            for (const product of vendor.products) {
+                if (!product.product || !product.quantity || !product.price) {
+                    return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
+                }
+            }
+        }
+
+        // Create a new order instance
+        const newOrder = new Order({
+            customer,
+            vendors,
+            shippingAddress
+        });
+
+        // Update product quantities and save the order to the database
+        for (const vendor of vendors) {
+            for (const productInfo of vendor.products) {
+                const product = await Product.findById(productInfo.product);
+                if (!product) {
+                    throw new Error(`Product with ID ${productInfo.product} not found`);
+                }
+                if (product.quantity < productInfo.quantity) {
+                    throw new Error(`Not enough quantity available for product ${product.name}`);
+                }
+                product.quantity -= productInfo.quantity;
+                await product.save();
+            }
+        }
+
+        // Save the order to the database
+        const savedOrder = await newOrder.save();
+
+        await session.commitTransaction();
+        session.endSession();
+
+        res.status(201).json(savedOrder);
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error("error", error);
+        res.status(400).json({ error: error.message });
+    }
+};
+
 
 // Controller function to get all orders for a particular vendor
 
@@ -101,7 +294,10 @@ exports.getOrdersByVendor = async (req, res) => {
                         customer: "$customerDetails",
                         shippingAddress: "$shippingAddress",
                         vendor: "$vendorDetails",
-                        orderStatus: "$vendors.orderStatus"
+                        orderStatus: "$vendors.orderStatus",
+                        isPaymentVerified: "$isPaymentVerified",
+                        paymentStatus: "$paymentStatus",
+                        razorpay_payment_id: "$razorpay_payment_id"
                     },
                     products: {
                         $push: {
@@ -122,6 +318,9 @@ exports.getOrdersByVendor = async (req, res) => {
                     orderId: "$_id.orderId",
                     customer: "$_id.customer",
                     shippingAddress: "$_id.shippingAddress",
+                    isPaymentVerified: "$_id.isPaymentVerified",
+                    paymentStatus: "$_id.paymentStatus",
+                    razorpay_payment_id: "$_id.razorpay_payment_id",
                     vendors: {
                         vendor: "$_id.vendor",
                         orderStatus: "$_id.orderStatus",
@@ -131,12 +330,107 @@ exports.getOrdersByVendor = async (req, res) => {
             }
         ]);
 
+
         res.status(200).json({
             success: true,
             data: vendorOrders
         });
     } catch (error) {
         console.error("Error fetching orders for vendor: ", error);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error'
+        });
+    }
+};
+
+exports.getRecentOrdersByVendor = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+
+        const recentVendorOrders = await Order.aggregate([
+            { $unwind: "$vendors" },
+            { $match: { "vendors.vendor": vendorId } },
+            {
+                $lookup: {
+                    from: "customers",
+                    localField: "customer",
+                    foreignField: "_id",
+                    as: "customerDetails"
+                }
+            },
+            { $unwind: "$customerDetails" },
+            {
+                $lookup: {
+                    from: "vendors",
+                    localField: "vendors.vendor",
+                    foreignField: "_id",
+                    as: "vendorDetails"
+                }
+            },
+            { $unwind: "$vendorDetails" },
+            { $unwind: "$vendors.products" },
+            {
+                $lookup: {
+                    from: "products",
+                    localField: "vendors.products.product",
+                    foreignField: "_id",
+                    as: "productDetails"
+                }
+            },
+            { $unwind: "$productDetails" },
+            {
+                $group: {
+                    _id: {
+                        orderId: "$_id",
+                        customer: "$customerDetails",
+                        shippingAddress: "$shippingAddress",
+                        vendor: "$vendorDetails",
+                        orderStatus: "$vendors.orderStatus",
+                        isPaymentVerified: "$isPaymentVerified",
+                        paymentStatus: "$paymentStatus",
+                        razorpay_payment_id: "$razorpay_payment_id",
+                        createdAt: "$createdAt"
+                    },
+                    products: {
+                        $push: {
+                            product: "$productDetails",
+                            quantity: "$vendors.products.quantity",
+                            price: "$vendors.products.price",
+                            discount: "$vendors.products.discount",
+                            _id: "$vendors.products._id",
+                            totalAmount: "$vendors.products.totalAmount"
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    orderId: "$_id.orderId",
+                    customer: "$_id.customer",
+                    shippingAddress: "$_id.shippingAddress",
+                    isPaymentVerified: "$_id.isPaymentVerified",
+                    paymentStatus: "$_id.paymentStatus",
+                    razorpay_payment_id: "$_id.razorpay_payment_id",
+                    createdAt: "$_id.createdAt",
+                    vendors: {
+                        vendor: "$_id.vendor",
+                        orderStatus: "$_id.orderStatus",
+                        products: "$products"
+                    }
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 5 }
+        ]);
+
+        res.status(200).json({
+            success: true,
+            data: recentVendorOrders
+        });
+    } catch (error) {
+        console.error("Error fetching recent orders for vendor: ", error);
         res.status(500).json({
             success: false,
             message: 'Server Error'

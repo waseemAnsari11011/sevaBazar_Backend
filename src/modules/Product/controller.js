@@ -8,7 +8,7 @@ exports.addProduct = async (req, res) => {
     console.log("Uploaded files:", req.files);
 
     try {
-        const { name, price, discount, description, category, vendor, availableLocalities } = req.body;
+        const { name, price, discount, description, category, vendor, availableLocalities, quantity } = req.body;
         const images = req.files.map(file => file.path); // Get the paths of the uploaded images
 
         console.log("vendor--->>>", vendor)
@@ -22,7 +22,8 @@ exports.addProduct = async (req, res) => {
             description,
             category,
             vendor,
-            availableLocalities
+            availableLocalities,
+            quantity
         });
 
         // Save the product to the database
@@ -62,6 +63,22 @@ exports.getAllProducts = async (req, res) => {
     }
 };
 
+// Controller to get products with low quantity
+exports.getProductsLowQuantity = async (req, res) => {
+    try {
+        const vendorId = req.params.vendorId; // Extract vendorId from request params
+
+        // Find products with quantity below 10 for the specified vendor
+        const lowQuantityProducts = await Product.find({ vendor: vendorId, quantity: { $lt: 10 } });
+
+        res.status(200).json(lowQuantityProducts);
+    } catch (error) {
+        console.error("Error fetching low quantity products:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
+
 // Controller function to get a product by ID
 exports.getProductById = async (req, res) => {
     try {
@@ -94,9 +111,7 @@ exports.getProductById = async (req, res) => {
 exports.updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, price, discount, description, category, existingImages, vendor, availableLocalities } = req.body;
-
-        console.log("vendor--->>>", vendor)
+        const { name, price, discount, description, category, existingImages, vendor, availableLocalities, quantity } = req.body;
 
         // Find the product by ID
         const product = await Product.findById(id);
@@ -115,12 +130,15 @@ exports.updateProduct = async (req, res) => {
         product.category = category || product.category;
         product.vendor = vendor || product.vendor;
         product.availableLocalities = availableLocalities || product.availableLocalities;
+        product.quantity = quantity || product.quantity;
 
-        // Combine existing images and new uploaded images
-        const newImages = req.files.map(file => file.path);
-        product.images = existingImages ? existingImages.concat(newImages) : newImages;
-
-        console.log("req.files update product--->>>", req.files)
+        // Combine existing images and new uploaded images if there are new images
+        if (req.files && req.files.length > 0) {
+            const newImages = req.files.map(file => file.path);
+            product.images = existingImages ? existingImages.concat(newImages) : newImages;
+        } else {
+            product.images = existingImages || product.images;
+        }
 
         // Save the updated product to the database
         const updatedProduct = await product.save();
@@ -138,6 +156,7 @@ exports.updateProduct = async (req, res) => {
         });
     }
 };
+
 
 // Controller function to delete a product by ID
 exports.deleteProduct = async (req, res) => {
@@ -192,15 +211,18 @@ exports.getProductsByCategoryId = async (req, res) => {
         // Find all products that belong to the given category ID and filter by userLocation
         const products = await Product.find({
             category: categoryId,
-            availableLocalities: { $in: [userLocation, 'all'] }
+            availableLocalities: { $in: [userLocation, 'all'] },
+            quantity: { $gt: 0 } // Add this filter to ensure quantity is greater than 0
         })
             .skip((page - 1) * limit)
             .limit(limit);
 
+
         // Count the total number of products in the category with the specified location filter
         const totalProducts = await Product.countDocuments({
             category: categoryId,
-            availableLocalities: { $in: [userLocation, 'all'] }
+            availableLocalities: { $in: [userLocation, 'all'] },
+            quantity: { $gt: 0 }
         });
 
         // Send the products in the response with pagination metadata
@@ -238,6 +260,7 @@ exports.getSimilarProducts = async (req, res) => {
         const similarProducts = await Product.find({
             category: product.category,
             availableLocalities: { $in: [userLocation, 'all'] },
+            quantity: { $gt: 0 },
             _id: { $ne: productId }
         })
             .skip((page - 1) * limit)
@@ -246,6 +269,7 @@ exports.getSimilarProducts = async (req, res) => {
         const totalSimilarProducts = await Product.countDocuments({
             category: product.category,
             availableLocalities: { $in: [userLocation, 'all'] },
+            quantity: { $gt: 0 },
             _id: { $ne: productId }
         });
 
@@ -269,7 +293,7 @@ exports.getRecentlyAddedProducts = async (req, res) => {
         const userLocation = req.query.userLocation;
 
         // Construct the filter for availableLocalities
-        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] } } : {};
+        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } } : { quantity: { $gt: 0 } };
 
         // Find the most recently added products with the location filter
         const recentlyAddedProducts = await Product.find(locationFilter)
@@ -299,7 +323,7 @@ exports.getDiscountedProducts = async (req, res) => {
         const userLocation = req.query.userLocation;
 
         // Construct the filter for availableLocalities
-        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] } } : {};
+        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } } : { quantity: { $gt: 0 } };
 
         // Combine the discount filter with the location filter
         const query = {
@@ -338,7 +362,7 @@ exports.fuzzySearchProducts = async (req, res) => {
         const regexQuery = new RegExp(searchQuery, 'i'); // 'i' for case-insensitive
 
         // Construct the filter for availableLocalities
-        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] } } : {};
+        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } } : { quantity: { $gt: 0 } };
 
         // Combine the search query with the location filter
         const query = {
@@ -351,8 +375,8 @@ exports.fuzzySearchProducts = async (req, res) => {
 
         // Find products that match the search query in the 'name' or 'description' and match the location filter
         const results = await Product.find(query)
-            // .skip((page - 1) * limit)
-            // .limit(parseInt(limit));
+        // .skip((page - 1) * limit)
+        // .limit(parseInt(limit));
 
         const totalResults = await Product.countDocuments(query);
 
