@@ -10,6 +10,8 @@ const CategoryRoutes = require('./src/modules/Category/route');
 const OrderRoutes = require('./src/modules/Order/route');
 const ReportRoutes = require('./src/modules/Reports/route');
 const InquiryRoutes = require('./src/modules/Inquiry/route');
+const FaqsRoutes = require('./src/modules/HelpCenter/route');
+const ContactRoutes = require('./src/modules/Contactus/route');
 
 
 const app = express();
@@ -38,6 +40,8 @@ app.use(CategoryRoutes);
 app.use(OrderRoutes);
 app.use(ReportRoutes);
 app.use(InquiryRoutes)
+app.use(FaqsRoutes)
+app.use(ContactRoutes)
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
