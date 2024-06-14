@@ -47,6 +47,19 @@ exports.updateCategory = async (req, res) => {
             });
         }
 
+        // Delete category images from the file system that are not in existingImages
+        category.images.forEach(imagePath => {
+            if (!existingImages.includes(imagePath)) {
+                // console.log("Deleting imagePath-->>", imagePath);
+                const fullPath = path.join(imagePath); // Adjust the path accordingly
+                fs.unlink(fullPath, err => {
+                    if (err) {
+                        console.error(`Failed to delete image file: ${fullPath}`, err);
+                    }
+                });
+            }
+        });
+
         // Update the category details
         category.name = name || category.name;
 

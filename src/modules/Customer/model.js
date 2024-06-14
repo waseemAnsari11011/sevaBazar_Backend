@@ -3,7 +3,13 @@ const Schema = mongoose.Schema;
 
 // Define the schema
 const customerSchema = new Schema({
+  name: {
+    type: String,
+  },
   password: {
+    type: String,
+  },
+  image: {
     type: String,
   },
   email: {

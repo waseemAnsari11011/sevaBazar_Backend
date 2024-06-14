@@ -6,8 +6,8 @@ const crypto = require('crypto');
 
 //razorpay
 const razorpay = new Razorpay({
-    key_id: 'rzp_test_nEIzO6bfk1HLkL',
-    key_secret: 'X9T9NWRdX0xSE9U2O0Kk1sHI'
+    key_id: process.env.KEY_ID,
+    key_secret: process.env.KEY_SECRET
 });
 
 exports.createOrderRazorpay = async (req, res) => {
@@ -33,6 +33,18 @@ exports.createOrderRazorpay = async (req, res) => {
             }
         }
 
+        for (const vendor of vendors) {
+            for (const productInfo of vendor.products) {
+                const product = await Product.findById(productInfo.product);
+                if (!product) {
+                    return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
+                }
+                if (product.quantity < productInfo.quantity) {
+                    return res.status(400).json({ error: `Not enough quantity available for product ${product.name}` });
+                }
+            }
+        }
+
         // Create a new order instance
         const newOrder = new Order({
             customer,
@@ -50,21 +62,6 @@ exports.createOrderRazorpay = async (req, res) => {
                 totalAmount += product.totalAmount;
             });
         });
-
-        // Update product quantities and save the order to the database
-        for (const vendor of vendors) {
-            for (const productInfo of vendor.products) {
-                const product = await Product.findById(productInfo.product);
-                if (!product) {
-                    throw new Error(`Product with ID ${productInfo.product} not found`);
-                }
-                if (product.quantity < productInfo.quantity) {
-                    throw new Error(`Not enough quantity available for product ${product.name}`);
-                }
-                product.quantity -= productInfo.quantity;
-                await product.save();
-            }
-        }
 
         // Create Razorpay order
         const options = {
@@ -92,10 +89,12 @@ exports.createOrderRazorpay = async (req, res) => {
 
 
 exports.updatePaymentStatus = async (req, res) => {
+
     try {
-        console.log("updatePaymentStatus")
         // Extract required fields from the request body
-        const { orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+        const { orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature, vendors } = req.body;
+
+        console.log("vendors-->>", vendors)
 
         // Ensure all required fields are present
         if (!orderId || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
@@ -124,6 +123,16 @@ exports.updatePaymentStatus = async (req, res) => {
             order.razorpay_payment_id = razorpay_payment_id;
             order.razorpay_order_id = razorpay_order_id;
             order.razorpay_signature = razorpay_signature;
+
+            // Update product quantities and save the order to the database
+            for (const vendor of vendors) {
+                for (const productInfo of vendor.products) {
+                    const product = await Product.findById(productInfo.product);
+                    product.quantity -= productInfo.quantity;
+                    await product.save();
+                }
+            }
+
         } else {
             // Update the order status to reflect failed payment
             order.isPaymentVerified = false;
@@ -135,6 +144,7 @@ exports.updatePaymentStatus = async (req, res) => {
 
         res.status(200).json(updatedOrder);
     } catch (error) {
+        console.log("error-->>", error)
         res.status(400).json({ error: error.message });
     }
 };
@@ -182,6 +192,8 @@ exports.updatePaymentStatusManually = async (req, res) => {
 exports.createOrder = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
+
+    console.log("createOrder--->>")
     try {
         const { customer, vendors, shippingAddress } = req.body;
 
@@ -214,10 +226,12 @@ exports.createOrder = async (req, res) => {
             for (const productInfo of vendor.products) {
                 const product = await Product.findById(productInfo.product);
                 if (!product) {
-                    throw new Error(`Product with ID ${productInfo.product} not found`);
+                    return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
                 }
                 if (product.quantity < productInfo.quantity) {
-                    throw new Error(`Not enough quantity available for product ${product.name}`);
+                    console.error("error quantity");
+
+                    return res.status(400).json({ error: `Not enough quantity available for product ${product.name}` });
                 }
                 product.quantity -= productInfo.quantity;
                 await product.save();
@@ -232,9 +246,9 @@ exports.createOrder = async (req, res) => {
 
         res.status(201).json(savedOrder);
     } catch (error) {
+
         await session.abortTransaction();
         session.endSession();
-        console.error("error", error);
         res.status(400).json({ error: error.message });
     }
 };

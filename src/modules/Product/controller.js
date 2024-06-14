@@ -46,8 +46,10 @@ exports.addProduct = async (req, res) => {
 // Controller function to get all products
 exports.getAllProducts = async (req, res) => {
     try {
+        const vendorId = req.params.vendorId;
+
         // Find all products and populate the category field
-        const products = await Product.find().populate('category');
+        const products = await Product.find({ vendor: vendorId}).populate('category');
 
         // Send response with the products
         res.status(200).json({
@@ -81,8 +83,11 @@ exports.getProductsLowQuantity = async (req, res) => {
 
 // Controller function to get a product by ID
 exports.getProductById = async (req, res) => {
+    console.log("getProductById->>", req.params.id)
+
     try {
         const { id } = req.params;
+
 
         // Find the product by ID and populate the category field
         const product = await Product.findById(id)
@@ -113,6 +118,8 @@ exports.updateProduct = async (req, res) => {
         const { id } = req.params;
         const { name, price, discount, description, category, existingImages, vendor, availableLocalities, quantity } = req.body;
 
+        // console.log("existingImages-->>", existingImages)
+
         // Find the product by ID
         const product = await Product.findById(id);
 
@@ -121,6 +128,19 @@ exports.updateProduct = async (req, res) => {
                 message: 'Product not found'
             });
         }
+
+        // Delete product images from the file system that are not in existingImages
+        product.images.forEach(imagePath => {
+            if (!existingImages.includes(imagePath)) {
+                // console.log("Deleting imagePath-->>", imagePath);
+                const fullPath = path.join(imagePath); // Adjust the path accordingly
+                fs.unlink(fullPath, err => {
+                    if (err) {
+                        console.error(`Failed to delete image file: ${fullPath}`, err);
+                    }
+                });
+            }
+        });
 
         // Update the product details
         product.name = name || product.name;
