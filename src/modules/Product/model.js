@@ -1,16 +1,11 @@
-// model.js
 const mongoose = require('mongoose');
 
-// Define the Product Schema
-const productSchema = new mongoose.Schema({
-    name: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    images: {
-        type: [String],  // Array of strings to store image URLs or paths
-        validate: [arrayLimit, '{PATH} exceeds the limit of 10'] // Optional: Limit the number of images
+// Define the Variation Schema
+const variationSchema = new mongoose.Schema({
+    attributes: {
+        type: Map,
+        of: String,
+        required: true
     },
     price: {
         type: Number,
@@ -26,7 +21,22 @@ const productSchema = new mongoose.Schema({
     quantity: {
         type: Number,
         default: 0,
+        min: 0
+    }
+});
+
+// Define the Product Schema
+const productSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
     },
+    images: {
+        type: [String],  // Array of strings to store image URLs or paths
+        validate: [arrayLimit, '{PATH} exceeds the limit of 10'] // Optional: Limit the number of images
+    },
+    variations: [variationSchema], // Adding variations as an array of Variation schema
     description: {
         type: String,
         trim: true
@@ -40,6 +50,22 @@ const productSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Vendor',
         required: true
+    },
+    price: {
+        type: Number,
+        required: true,
+        min: 0
+    },
+    discount: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100  // Assuming discount is a percentage
+    },
+    quantity: {
+        type: Number,
+        default: 0,
+        min: 0
     },
     availableLocalities: [{
         type: String,

@@ -8,22 +8,46 @@ exports.addProduct = async (req, res) => {
     console.log("Uploaded files:", req.files);
 
     try {
-        const { name, price, discount, description, category, vendor, availableLocalities, quantity } = req.body;
+        const { name, description, category, vendor, availableLocalities } = req.body;
         const images = req.files.map(file => file.path); // Get the paths of the uploaded images
 
-        console.log("vendor--->>>", vendor)
+        // Parse the variations from the request body (assuming it's sent as a JSON string)
+        const variations = JSON.parse(req.body.variations);
+
+        if (!variations || variations.length === 0) {
+            return res.status(400).json({
+                message: 'At least one variation is required'
+            });
+        }
+
+        // Validate and structure the variations array
+        const formattedVariations = variations.map(variation => ({
+            attributes: variation.attributes, // Ensure this is a map of key-value pairs
+            price: variation.price,
+            discount: variation.discount,
+            quantity: variation.quantity
+        }));
+
+        // Extract the first variation's price and discount for the root-level fields
+        const rootPrice = formattedVariations[0].price;
+        const rootDiscount = formattedVariations[0].discount;
+        const rootQuantity = formattedVariations[0].quantity;
+
+
+        console.log("vendor--->>>", vendor);
 
         // Create a new product instance
         const newProduct = new Product({
             name,
             images,
-            price,
-            discount,
+            variations: formattedVariations,
             description,
             category,
             vendor,
             availableLocalities,
-            quantity
+            price: rootPrice,
+            discount: rootDiscount,
+            quantity: rootQuantity
         });
 
         // Save the product to the database
@@ -43,13 +67,15 @@ exports.addProduct = async (req, res) => {
     }
 };
 
+
+
 // Controller function to get all products
 exports.getAllProducts = async (req, res) => {
     try {
         const vendorId = req.params.vendorId;
 
         // Find all products and populate the category field
-        const products = await Product.find({ vendor: vendorId}).populate('category');
+        const products = await Product.find({ vendor: vendorId }).populate('category');
 
         // Send response with the products
         res.status(200).json({
@@ -116,9 +142,18 @@ exports.getProductById = async (req, res) => {
 exports.updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, price, discount, description, category, existingImages, vendor, availableLocalities, quantity } = req.body;
-
-        // console.log("existingImages-->>", existingImages)
+        const {
+            name,
+            price,
+            discount,
+            description,
+            category,
+            vendor,
+            availableLocalities,
+            quantity,
+            variations, // Include variations in the request body
+            existingImages // Include existingImages in the request body
+        } = req.body;
 
         // Find the product by ID
         const product = await Product.findById(id);
@@ -132,7 +167,6 @@ exports.updateProduct = async (req, res) => {
         // Delete product images from the file system that are not in existingImages
         product.images.forEach(imagePath => {
             if (!existingImages.includes(imagePath)) {
-                // console.log("Deleting imagePath-->>", imagePath);
                 const fullPath = path.join(imagePath); // Adjust the path accordingly
                 fs.unlink(fullPath, err => {
                     if (err) {
@@ -142,15 +176,41 @@ exports.updateProduct = async (req, res) => {
             }
         });
 
+        // Validate and structure the variations array
+        const formattedVariations = JSON.parse(variations).map(variation => ({
+            attributes: variation.attributes, // Ensure this is a map of key-value pairs
+            price: variation.price,
+            discount: variation.discount,
+            quantity: variation.quantity
+        }));
+
+        // Extract the first variation's price and discount for the root-level fields
+        const rootPrice = formattedVariations[0].price;
+        const rootDiscount = formattedVariations[0].discount;
+        const rootQuantity = formattedVariations[0].quantity;
+
+
+
+        
+
         // Update the product details
         product.name = name || product.name;
-        product.price = price || product.price;
-        product.discount = discount || product.discount;
+        product.price = rootPrice;
+        product.discount = rootDiscount;
         product.description = description || product.description;
         product.category = category || product.category;
         product.vendor = vendor || product.vendor;
         product.availableLocalities = availableLocalities || product.availableLocalities;
-        product.quantity = quantity || product.quantity;
+        product.quantity = rootQuantity
+
+        
+
+        // Update variations
+        if (typeof variations === 'string') {
+            product.variations = JSON.parse(variations); // Parse variations if it's a JSON string
+        } else if (Array.isArray(variations)) {
+            product.variations = variations; // Use variations directly if it's an array
+        }
 
         // Combine existing images and new uploaded images if there are new images
         if (req.files && req.files.length > 0) {
@@ -351,6 +411,8 @@ exports.getDiscountedProducts = async (req, res) => {
             ...locationFilter
         };
 
+        console.log("query-->>", query)
+
         // Find products that have a discount greater than 0 and match the location filter
         const discountedProducts = await Product.find(query)
             .sort({ discount: -1 }) // Optionally, sort by the highest discount first
@@ -358,6 +420,8 @@ exports.getDiscountedProducts = async (req, res) => {
             .limit(limit);
 
         const totalDiscountedProducts = await Product.countDocuments(query);
+
+        console.log("totalDiscountedProducts-->>", totalDiscountedProducts)
 
         res.json({
             total: totalDiscountedProducts,
