@@ -1,17 +1,13 @@
 const Product = require('./model'); // Adjust the path as necessary
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 
 // Controller function to add a new product
 exports.addProduct = async (req, res) => {
-    console.log("Request body:", req.body);
-    console.log("Uploaded files:", req.files);
-
     try {
         const { name, description, category, vendor, availableLocalities } = req.body;
-        const images = req.files.map(file => file.path); // Get the paths of the uploaded images
-
-        // Parse the variations from the request body (assuming it's sent as a JSON string)
+        const images = req.files.map(file => file.path);
         const variations = JSON.parse(req.body.variations);
 
         if (!variations || variations.length === 0) {
@@ -20,35 +16,73 @@ exports.addProduct = async (req, res) => {
             });
         }
 
-        // Validate and structure the variations array
-        const formattedVariations = variations.map(variation => ({
-            attributes: variation.attributes, // Ensure this is a map of key-value pairs
-            price: variation.price,
-            discount: variation.discount,
-            quantity: variation.quantity
-        }));
-
-        // Extract the first variation's price and discount for the root-level fields
-        const rootPrice = formattedVariations[0].price;
-        const rootDiscount = formattedVariations[0].discount;
-        const rootQuantity = formattedVariations[0].quantity;
-
-
-        console.log("vendor--->>>", vendor);
-
-        // Create a new product instance
+        // Create new product instance first
         const newProduct = new Product({
             name,
             images,
-            variations: formattedVariations,
             description,
             category,
             vendor,
-            availableLocalities,
-            price: rootPrice,
-            discount: rootDiscount,
-            quantity: rootQuantity
+            availableLocalities
         });
+
+        // Temporary map to store created variation references by index and to sum child quantities
+        const variationReferences = {};
+        const childQuantities = {};
+
+        // Process and format variations
+        const formattedVariations = variations.map((variation, index) => {
+            const formattedVariation = {
+                attributes: variation.attributes,
+                price: parseInt(variation.price),  // Convert price to integer
+                discount: parseInt(variation.discount),  // Convert discount to integer
+                quantity: parseInt(variation.quantity),  // Convert quantity to integer
+                parentVariation: null  // Initialize parentVariation as null
+            };
+
+            if (variation.parentVariation !== null && variation.parentVariation !== '') {
+                // Extract the parent variation index from the parentVariation field
+                const parentIndex = variation.parentVariation.match(/\d+/)[0];
+
+                // Check if parent variation already exists in the map
+                if (variationReferences[parentIndex]) {
+                    formattedVariation.parentVariation = variationReferences[parentIndex]._id;
+
+                    // Sum the quantities of child variations
+                    if (!childQuantities[parentIndex]) {
+                        childQuantities[parentIndex] = 0;
+                    }
+                    childQuantities[parentIndex] += formattedVariation.quantity;
+                } else {
+                    return res.status(400).json({
+                        message: `Parent variation not found for: ${variation.parentVariation}`
+                    });
+                }
+            }
+
+            // Create the variation and store the reference using the index
+            const createdVariation = newProduct.variations.create(formattedVariation);
+            variationReferences[index + 1] = createdVariation;
+
+            return createdVariation;
+        });
+
+        // Validate child quantities against parent quantities
+        for (const parentIndex in childQuantities) {
+            if (childQuantities[parentIndex] > variationReferences[parentIndex].quantity) {
+                return res.status(400).json({
+                    message: `Sum of child quantities exceeds parent quantity for parent variation: ${parentIndex}`
+                });
+            }
+        }
+
+        // Add variations to product
+        newProduct.variations = formattedVariations;
+
+        // Set root level fields
+        newProduct.price = formattedVariations[0].price;
+        newProduct.discount = formattedVariations[0].discount;
+        newProduct.quantity = variations.reduce((sum, variation) => sum + parseInt(variation.quantity), 0);
 
         // Save the product to the database
         const savedProduct = await newProduct.save();
@@ -66,6 +100,9 @@ exports.addProduct = async (req, res) => {
         });
     }
 };
+
+
+
 
 
 
@@ -96,15 +133,35 @@ exports.getProductsLowQuantity = async (req, res) => {
     try {
         const vendorId = req.params.vendorId; // Extract vendorId from request params
 
-        // Find products with quantity below 10 for the specified vendor
-        const lowQuantityProducts = await Product.find({ vendor: vendorId, quantity: { $lt: 10 } });
+        // Find products for the specified vendor
+        const products = await Product.find({ vendor: vendorId }).lean();
 
-        res.status(200).json(lowQuantityProducts);
+        // Filter products where parent variation quantity is less than 10
+        const lowQuantityProducts = products.filter(product => {
+            return product.variations.some(variation => !variation.parentVariation && variation.quantity < 10);
+        });
+
+        // Include child variations for filtered products
+        const result = lowQuantityProducts.map(product => {
+            const parentVariations = product.variations.filter(variation => !variation.parentVariation && variation.quantity < 10);
+            const childVariations = product.variations.filter(variation => parentVariations.some(parent => parent._id.equals(variation.parentVariation)));
+            return {
+                ...product,
+                variations: [...parentVariations, ...childVariations]
+            };
+        });
+
+        res.json(result);
+
     } catch (error) {
         console.error("Error fetching low quantity products:", error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 };
+
+
+
+
 
 
 // Controller function to get a product by ID
@@ -150,9 +207,8 @@ exports.updateProduct = async (req, res) => {
             category,
             vendor,
             availableLocalities,
-            quantity,
-            variations, // Include variations in the request body
-            existingImages // Include existingImages in the request body
+            variations,
+            existingImages
         } = req.body;
 
         // Find the product by ID
@@ -181,36 +237,52 @@ exports.updateProduct = async (req, res) => {
             attributes: variation.attributes, // Ensure this is a map of key-value pairs
             price: variation.price,
             discount: variation.discount,
-            quantity: variation.quantity
+            quantity: variation.quantity,
+            parentVariation: variation.parentVariation ? new mongoose.Types.ObjectId(variation.parentVariation) : null,
+            _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId()
         }));
 
-        // Extract the first variation's price and discount for the root-level fields
-        const rootPrice = formattedVariations[0].price;
-        const rootDiscount = formattedVariations[0].discount;
-        const rootQuantity = formattedVariations[0].quantity;
+        // Map to track child quantities
+        const childQuantities = {};
 
+        // Calculate total quantity and validate child quantities
+        const totalQuantity = formattedVariations.reduce((sum, variation) => {
+            if (variation.parentVariation === null) {
+                return sum + variation.quantity;
+            } else {
+                const parentId = variation.parentVariation.toString();
+                if (!childQuantities[parentId]) {
+                    childQuantities[parentId] = 0;
+                }
+                childQuantities[parentId] += variation.quantity;
+                return sum;
+            }
+        }, 0);
 
-
-        
+        // Validate child quantities against parent quantities
+        for (const variation of formattedVariations) {
+            if (variation.parentVariation === null) {
+                const parentId = variation._id.toString();
+                if (childQuantities[parentId] > variation.quantity) {
+                    return res.status(400).json({
+                        message: `Sum of child quantities exceeds parent quantity for parent variation: ${parentId}`
+                    });
+                }
+            }
+        }
 
         // Update the product details
         product.name = name || product.name;
-        product.price = rootPrice;
-        product.discount = rootDiscount;
+        product.price = formattedVariations[0].price;
+        product.discount = formattedVariations[0].discount;
         product.description = description || product.description;
         product.category = category || product.category;
         product.vendor = vendor || product.vendor;
         product.availableLocalities = availableLocalities || product.availableLocalities;
-        product.quantity = rootQuantity
-
-        
+        product.quantity = totalQuantity;
 
         // Update variations
-        if (typeof variations === 'string') {
-            product.variations = JSON.parse(variations); // Parse variations if it's a JSON string
-        } else if (Array.isArray(variations)) {
-            product.variations = variations; // Use variations directly if it's an array
-        }
+        product.variations = formattedVariations;
 
         // Combine existing images and new uploaded images if there are new images
         if (req.files && req.files.length > 0) {
@@ -236,6 +308,7 @@ exports.updateProduct = async (req, res) => {
         });
     }
 };
+
 
 
 // Controller function to delete a product by ID
@@ -474,6 +547,81 @@ exports.fuzzySearchProducts = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+
+exports.updateVariationQuantity = async (req, res) => {
+    try {
+        const { productId, variationId } = req.params;
+        const { quantity } = req.body;
+
+        // Find the product by ID
+        const product = await Product.findById(productId);
+
+        if (!product) {
+            return res.status(404).json({
+                message: 'Product not found'
+            });
+        }
+
+        // Find the variation by ID within the product's variations array
+        const variation = product.variations.id(variationId);
+
+        if (!variation) {
+            return res.status(404).json({
+                message: 'Variation not found'
+            });
+        }
+
+        // Find the parent variation if exists
+        const parentVariation = variation.parentVariation ? product.variations.id(variation.parentVariation) : null;
+
+        // If the variation has a parent, check if the total quantity of all child variations exceeds the parent's quantity
+        if (parentVariation) {
+            // Update the quantity of the found variation
+            variation.quantity = quantity;
+
+            // Find all child variations of the parent variation
+            const childVariations = product.variations.filter(v =>
+                v.parentVariation && v.parentVariation.equals(parentVariation._id)
+            );
+
+            // Calculate the total quantity of all child variations including the current variation
+            const totalChildQuantity = childVariations.reduce((sum, v) => sum + v.quantity, 0);
+
+            if (totalChildQuantity > parentVariation.quantity) {
+                return res.status(400).json({
+                    message: 'Total quantity of child variations cannot exceed parent variation quantity'
+                });
+            }
+        } else {
+            // Update the quantity of the variation if it's a parent variation
+            variation.quantity = quantity;
+        }
+
+        // Recalculate the root level quantity field
+        const totalQuantity = product.variations.reduce((sum, v) =>
+            v.parentVariation === null ? sum + v.quantity : sum, 0);
+
+        product.quantity = totalQuantity;
+
+        // Save the updated product to the database
+        const updatedProduct = await product.save();
+
+        // Send response
+        res.status(200).json({
+            message: 'Variation quantity updated successfully',
+            product: updatedProduct
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to update variation quantity',
+            error: error.message
+        });
+    }
+};
+
+
 
 
 

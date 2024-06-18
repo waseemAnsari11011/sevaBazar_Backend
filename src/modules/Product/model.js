@@ -16,12 +16,17 @@ const variationSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: 0,
-        max: 100  // Assuming discount is a percentage
+        max: 100
     },
     quantity: {
         type: Number,
         default: 0,
         min: 0
+    },
+    parentVariation: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product.variations',
+        default: null
     }
 });
 
@@ -33,10 +38,10 @@ const productSchema = new mongoose.Schema({
         trim: true
     },
     images: {
-        type: [String],  // Array of strings to store image URLs or paths
-        validate: [arrayLimit, '{PATH} exceeds the limit of 10'] // Optional: Limit the number of images
+        type: [String],
+        validate: [arrayLimit, '{PATH} exceeds the limit of 10']
     },
-    variations: [variationSchema], // Adding variations as an array of Variation schema
+    variations: [variationSchema],
     description: {
         type: String,
         trim: true
@@ -60,7 +65,7 @@ const productSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: 0,
-        max: 100  // Assuming discount is a percentage
+        max: 100
     },
     quantity: {
         type: Number,
@@ -72,7 +77,7 @@ const productSchema = new mongoose.Schema({
         required: true
     }],
 }, {
-    timestamps: true // Automatically add createdAt and updatedAt timestamps
+    timestamps: true
 });
 
 // Custom validator to limit array size

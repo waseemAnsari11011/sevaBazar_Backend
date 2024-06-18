@@ -18,4 +18,6 @@ router.get('/recentlyAddedProducts', productController.getRecentlyAddedProducts)
 router.get('/onDiscountProducts', productController.getDiscountedProducts);
 router.get('/searchProducts', productController.fuzzySearchProducts);
 
+router.put('/products/:productId/variations/:variationId', productController.updateVariationQuantity);
+
 module.exports = router;
