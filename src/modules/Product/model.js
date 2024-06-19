@@ -1,16 +1,11 @@
-// model.js
 const mongoose = require('mongoose');
 
-// Define the Product Schema
-const productSchema = new mongoose.Schema({
-    name: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    images: {
-        type: [String],  // Array of strings to store image URLs or paths
-        validate: [arrayLimit, '{PATH} exceeds the limit of 10'] // Optional: Limit the number of images
+// Define the Variation Schema
+const variationSchema = new mongoose.Schema({
+    attributes: {
+        type: Map,
+        of: String,
+        required: true
     },
     price: {
         type: Number,
@@ -21,12 +16,32 @@ const productSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: 0,
-        max: 100  // Assuming discount is a percentage
+        max: 100
     },
     quantity: {
         type: Number,
         default: 0,
+        min: 0
     },
+    parentVariation: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product.variations',
+        default: null
+    }
+});
+
+// Define the Product Schema
+const productSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    images: {
+        type: [String],
+        validate: [arrayLimit, '{PATH} exceeds the limit of 10']
+    },
+    variations: [variationSchema],
     description: {
         type: String,
         trim: true
@@ -41,12 +56,28 @@ const productSchema = new mongoose.Schema({
         ref: 'Vendor',
         required: true
     },
+    price: {
+        type: Number,
+        required: true,
+        min: 0
+    },
+    discount: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
+    quantity: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
     availableLocalities: [{
         type: String,
         required: true
     }],
 }, {
-    timestamps: true // Automatically add createdAt and updatedAt timestamps
+    timestamps: true
 });
 
 // Custom validator to limit array size

@@ -27,7 +27,7 @@ exports.createOrderRazorpay = async (req, res) => {
                 return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
             }
             for (const product of vendor.products) {
-                if (!product.product || !product.quantity || !product.price) {
+                if (!product.product || !product.quantity || !product.price || !product.variations) {
                     return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
                 }
             }
@@ -197,6 +197,8 @@ exports.createOrder = async (req, res) => {
     try {
         const { customer, vendors, shippingAddress } = req.body;
 
+        // console.log("vendor.products-->>", vendor.products)
+
         // Validate required fields
         if (!customer || !vendors || !shippingAddress) {
             return res.status(400).json({ error: 'All required fields must be provided' });
@@ -208,7 +210,8 @@ exports.createOrder = async (req, res) => {
                 return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
             }
             for (const product of vendor.products) {
-                if (!product.product || !product.quantity || !product.price) {
+                console.log("product.variations", product.variations)
+                if (!product.product || !product.quantity || !product.price || !product.variations) {
                     return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
                 }
             }
@@ -224,19 +227,51 @@ exports.createOrder = async (req, res) => {
         // Update product quantities and save the order to the database
         for (const vendor of vendors) {
             for (const productInfo of vendor.products) {
+                console.log("ordered variations-->>", productInfo.variations);
+
                 const product = await Product.findById(productInfo.product);
                 if (!product) {
                     return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
                 }
-                if (product.quantity < productInfo.quantity) {
-                    console.error("error quantity");
 
-                    return res.status(400).json({ error: `Not enough quantity available for product ${product.name}` });
+                // Loop through each ordered variation
+                for (const orderedVariation of productInfo.variations) {
+                    // Find the matching variation in the product's variations
+                    const productVariation = product.variations.find(
+                        variation => variation._id.toString() === orderedVariation._id
+                    );
+
+                    if (productVariation) {
+                        // Decrease the quantity of the matching variation by the ordered quantity
+                        productVariation.quantity -= orderedVariation.quantity;
+
+                        console.log("productVariation.quantity-->>", productVariation.quantity)
+
+                        // Check for negative quantity and handle it appropriately if needed
+                        if (productVariation.quantity < 0) {
+                            return res.status(400).json({ error: `Insufficient quantity for variation ${orderedVariation._id}` });
+                        }
+                    } else {
+                        return res.status(400).json({ error: `Variation with ID ${orderedVariation._id} not found in product ${productInfo.product}` });
+                    }
                 }
-                product.quantity -= productInfo.quantity;
+
+
+
+                // Sum the quantities of all variations
+                const totalQuantity = product.variations.reduce((sum, variation) =>
+                    variation.parentVariation === null ? sum + variation.quantity : sum, 0);
+
+                // Update the root-level quantity of the product
+                product.quantity = totalQuantity;
+
+                // Save the updated product document back to the database
                 await product.save();
             }
         }
+
+
+
 
         // Save the order to the database
         const savedOrder = await newOrder.save();
@@ -319,6 +354,7 @@ exports.getOrdersByVendor = async (req, res) => {
                             quantity: "$vendors.products.quantity",
                             price: "$vendors.products.price",
                             discount: "$vendors.products.discount",
+                            orderedVariations: "$vendors.products.variations",
                             _id: "$vendors.products._id",
                             totalAmount: "$vendors.products.totalAmount"
                         }

@@ -20,6 +20,9 @@ const orderSchema = new Schema({
                 ref: 'Product',
                 required: true
             },
+            variations: {
+                type: Array,
+            },
             quantity: {
                 type: Number,
                 required: true,
@@ -73,7 +76,7 @@ const orderSchema = new Schema({
         type: Boolean,
         default: false
     },
-    paymentStatus:{
+    paymentStatus: {
         type: String,
         enum: ['Paid', 'Unpaid'],
         default: 'Unpaid'
@@ -99,6 +102,7 @@ const orderSchema = new Schema({
 
 // Pre-save middleware to calculate the total amount for each product
 orderSchema.pre('save', function (next) {
+    let deliveryCharge = 20
     this.vendors.forEach(vendor => {
         vendor.products.forEach(product => {
             product.totalAmount = (product.price - (product.price * product.discount / 100)) * product.quantity;
