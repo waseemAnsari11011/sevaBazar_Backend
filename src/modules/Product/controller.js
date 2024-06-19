@@ -101,6 +101,122 @@ exports.addProduct = async (req, res) => {
     }
 };
 
+// Controller function to update an existing product
+exports.updateProduct = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            name,
+            price,
+            discount,
+            description,
+            category,
+            vendor,
+            availableLocalities,
+            variations,
+            existingImages
+        } = req.body;
+
+        // Find the product by ID
+        const product = await Product.findById(id);
+
+        if (!product) {
+            return res.status(404).json({
+                message: 'Product not found'
+            });
+        }
+
+        // Delete product images from the file system that are not in existingImages
+        product.images.forEach(imagePath => {
+            if (!existingImages.includes(imagePath)) {
+                const fullPath = path.join(imagePath); // Adjust the path accordingly
+                fs.unlink(fullPath, err => {
+                    if (err) {
+                        console.error(`Failed to delete image file: ${fullPath}`, err);
+                    }
+                });
+            }
+        });
+
+        // Validate and structure the variations array
+        const formattedVariations = JSON.parse(variations).map(variation => ({
+            attributes: variation.attributes, // Ensure this is a map of key-value pairs
+            price: variation.price,
+            discount: variation.discount,
+            quantity: variation.quantity,
+            parentVariation: variation.parentVariation ? new mongoose.Types.ObjectId(variation.parentVariation) : null,
+            _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId()
+        }));
+
+        // Map to track child quantities
+        const childQuantities = {};
+
+        console.log("childQuantities-->>", childQuantities)
+
+        // Calculate total quantity and validate child quantities
+        const totalQuantity = formattedVariations.reduce((sum, variation) => {
+            if (variation.parentVariation === null) {
+                return sum + variation.quantity;
+            } else {
+                const parentId = variation.parentVariation.toString();
+                if (!childQuantities[parentId]) {
+                    childQuantities[parentId] = 0;
+                }
+                childQuantities[parentId] += variation.quantity;
+                return sum;
+            }
+        }, 0);
+
+        // Validate child quantities against parent quantities
+        for (const variation of formattedVariations) {
+            if (variation.parentVariation === null) {
+                const parentId = variation._id.toString();
+                if (childQuantities[parentId] > variation.quantity) {
+                    return res.status(400).json({
+                        message: `Sum of child quantities exceeds parent quantity for parent variation: ${parentId}`
+                    });
+                }
+            }
+        }
+
+        // Update the product details
+        product.name = name || product.name;
+        product.price = formattedVariations[0].price;
+        product.discount = formattedVariations[0].discount;
+        product.description = description || product.description;
+        product.category = category || product.category;
+        product.vendor = vendor || product.vendor;
+        product.availableLocalities = availableLocalities || product.availableLocalities;
+        product.quantity = totalQuantity;
+
+        // Update variations
+        product.variations = formattedVariations;
+
+        // Combine existing images and new uploaded images if there are new images
+        if (req.files && req.files.length > 0) {
+            const newImages = req.files.map(file => file.path);
+            product.images = existingImages ? existingImages.concat(newImages) : newImages;
+        } else {
+            product.images = existingImages || product.images;
+        }
+
+        // Save the updated product to the database
+        const updatedProduct = await product.save();
+
+        // Send response
+        res.status(200).json({
+            message: 'Product updated successfully',
+            product: updatedProduct
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to update product',
+            error: error.message
+        });
+    }
+};
+
 
 
 
@@ -195,119 +311,7 @@ exports.getProductById = async (req, res) => {
     }
 };
 
-// Controller function to update an existing product
-exports.updateProduct = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const {
-            name,
-            price,
-            discount,
-            description,
-            category,
-            vendor,
-            availableLocalities,
-            variations,
-            existingImages
-        } = req.body;
 
-        // Find the product by ID
-        const product = await Product.findById(id);
-
-        if (!product) {
-            return res.status(404).json({
-                message: 'Product not found'
-            });
-        }
-
-        // Delete product images from the file system that are not in existingImages
-        product.images.forEach(imagePath => {
-            if (!existingImages.includes(imagePath)) {
-                const fullPath = path.join(imagePath); // Adjust the path accordingly
-                fs.unlink(fullPath, err => {
-                    if (err) {
-                        console.error(`Failed to delete image file: ${fullPath}`, err);
-                    }
-                });
-            }
-        });
-
-        // Validate and structure the variations array
-        const formattedVariations = JSON.parse(variations).map(variation => ({
-            attributes: variation.attributes, // Ensure this is a map of key-value pairs
-            price: variation.price,
-            discount: variation.discount,
-            quantity: variation.quantity,
-            parentVariation: variation.parentVariation ? new mongoose.Types.ObjectId(variation.parentVariation) : null,
-            _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId()
-        }));
-
-        // Map to track child quantities
-        const childQuantities = {};
-
-        // Calculate total quantity and validate child quantities
-        const totalQuantity = formattedVariations.reduce((sum, variation) => {
-            if (variation.parentVariation === null) {
-                return sum + variation.quantity;
-            } else {
-                const parentId = variation.parentVariation.toString();
-                if (!childQuantities[parentId]) {
-                    childQuantities[parentId] = 0;
-                }
-                childQuantities[parentId] += variation.quantity;
-                return sum;
-            }
-        }, 0);
-
-        // Validate child quantities against parent quantities
-        for (const variation of formattedVariations) {
-            if (variation.parentVariation === null) {
-                const parentId = variation._id.toString();
-                if (childQuantities[parentId] > variation.quantity) {
-                    return res.status(400).json({
-                        message: `Sum of child quantities exceeds parent quantity for parent variation: ${parentId}`
-                    });
-                }
-            }
-        }
-
-        // Update the product details
-        product.name = name || product.name;
-        product.price = formattedVariations[0].price;
-        product.discount = formattedVariations[0].discount;
-        product.description = description || product.description;
-        product.category = category || product.category;
-        product.vendor = vendor || product.vendor;
-        product.availableLocalities = availableLocalities || product.availableLocalities;
-        product.quantity = totalQuantity;
-
-        // Update variations
-        product.variations = formattedVariations;
-
-        // Combine existing images and new uploaded images if there are new images
-        if (req.files && req.files.length > 0) {
-            const newImages = req.files.map(file => file.path);
-            product.images = existingImages ? existingImages.concat(newImages) : newImages;
-        } else {
-            product.images = existingImages || product.images;
-        }
-
-        // Save the updated product to the database
-        const updatedProduct = await product.save();
-
-        // Send response
-        res.status(200).json({
-            message: 'Product updated successfully',
-            product: updatedProduct
-        });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({
-            message: 'Failed to update product',
-            error: error.message
-        });
-    }
-};
 
 
 
