@@ -138,51 +138,82 @@ exports.updateProduct = async (req, res) => {
             }
         });
 
+        // Parse and process the variations array
+        const parsedVariations = JSON.parse(variations);
+        const variationMap = {}; // To store parent variations by their attributes
+
+        // First, add all parent variations to the map, generating IDs if they do not exist
+        parsedVariations.forEach(variation => {
+            if (variation.parentVariation === null) {
+                const key = `${variation.attributes.selected}:${variation.attributes.value}`;
+                variation._id = variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId();
+                variationMap[key] = variation._id;
+            }
+        });
+
+        console.log("variationMap-->>", variationMap)
+
         // Validate and structure the variations array
-        const formattedVariations = JSON.parse(variations).map(variation => ({
-            attributes: variation.attributes, // Ensure this is a map of key-value pairs
-            price: variation.price,
-            discount: variation.discount,
-            quantity: variation.quantity,
-            parentVariation: variation.parentVariation ? new mongoose.Types.ObjectId(variation.parentVariation) : null,
-            _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId()
-        }));
+        const formattedVariations = parsedVariations.map(variation => {
+            let parentVariationId = null;
+            if (variation.parentVariation && !mongoose.Types.ObjectId.isValid(variation.parentVariation)) {
+                const parentAttr = variation.parentVariation.split(' - ');
+                console.log("parentAttr-->>", parentAttr)
+                if (parentAttr.length === 2) {
+                    const parentAttr1 = parentAttr[1].split(": ")
+                    const key = `${parentAttr1[0]}:${parentAttr1[1]}`
+                    console.log("key-->>", key)
+                    parentVariationId = variationMap[key];
+                    console.log("parentVariationId-->>", parentVariationId)
+                }
+            } else {
+                parentVariationId = variation.parentVariation ? new mongoose.Types.ObjectId(variation.parentVariation) : null;
+            }
 
-        // Map to track child quantities
-        const childQuantities = {};
-
-        console.log("childQuantities-->>", childQuantities)
+            return {
+                attributes: variation.attributes,
+                price: parseInt(variation.price),
+                discount: parseInt(variation.discount),
+                quantity: parseInt(variation.quantity),
+                parentVariation: parentVariationId ? new mongoose.Types.ObjectId(parentVariationId) : null,
+                _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId()
+            };
+        });
 
         // Calculate total quantity and validate child quantities
-        const totalQuantity = formattedVariations.reduce((sum, variation) => {
-            if (variation.parentVariation === null) {
-                return sum + variation.quantity;
-            } else {
+        const parentQuantities = {};
+        formattedVariations.forEach(variation => {
+            if (variation.parentVariation) {
                 const parentId = variation.parentVariation.toString();
-                if (!childQuantities[parentId]) {
-                    childQuantities[parentId] = 0;
+                if (!parentQuantities[parentId]) {
+                    parentQuantities[parentId] = 0;
                 }
-                childQuantities[parentId] += variation.quantity;
-                return sum;
+                parentQuantities[parentId] += variation.quantity;
             }
-        }, 0);
+        });
 
-        // Validate child quantities against parent quantities
-        for (const variation of formattedVariations) {
-            if (variation.parentVariation === null) {
-                const parentId = variation._id.toString();
-                if (childQuantities[parentId] > variation.quantity) {
-                    return res.status(400).json({
-                        message: `Sum of child quantities exceeds parent quantity for parent variation: ${parentId}`
-                    });
-                }
+        // Check if any child quantities exceed their parent quantities
+        for (const [parentId, totalChildQuantity] of Object.entries(parentQuantities)) {
+            const parentVariation = formattedVariations.find(variation => variation._id.toString() === parentId);
+            if (parentVariation && totalChildQuantity > parentVariation.quantity) {
+                return res.status(400).json({
+                    message: `Total quantity of child variations (${totalChildQuantity}) exceeds parent variation quantity (${parentVariation.quantity}) for parent variation ID: ${parentId}`
+                });
             }
         }
 
+        // Calculate total quantity for the product
+        const totalQuantity = formattedVariations.reduce((sum, variation) => {
+            if (variation.parentVariation === null) {
+                return sum + variation.quantity;
+            }
+            return sum;
+        }, 0);
+
         // Update the product details
         product.name = name || product.name;
-        product.price = formattedVariations[0].price;
-        product.discount = formattedVariations[0].discount;
+        product.price = parseInt(price) || formattedVariations[0].price;
+        product.discount = parseInt(discount) || formattedVariations[0].discount;
         product.description = description || product.description;
         product.category = category || product.category;
         product.vendor = vendor || product.vendor;
