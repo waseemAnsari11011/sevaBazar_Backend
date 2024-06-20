@@ -12,10 +12,6 @@ const customerSchema = new Schema({
   image: {
     type: String,
   },
-  email: {
-    type: String,
-    unique: true
-  },
   contactNumber: {
     type: String,
     required: true
