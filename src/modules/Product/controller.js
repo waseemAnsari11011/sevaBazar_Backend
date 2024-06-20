@@ -37,7 +37,8 @@ exports.addProduct = async (req, res) => {
                 price: parseInt(variation.price),  // Convert price to integer
                 discount: parseInt(variation.discount),  // Convert discount to integer
                 quantity: parseInt(variation.quantity),  // Convert quantity to integer
-                parentVariation: null  // Initialize parentVariation as null
+                image: variation.image,
+                parentVariation: null,  // Initialize parentVariation as null,
             };
 
             if (variation.parentVariation !== null && variation.parentVariation !== '') {
