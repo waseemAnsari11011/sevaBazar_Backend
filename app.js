@@ -20,6 +20,7 @@ app.use(cors());
 const port = process.env.PORT || 3000;
 
 
+
 // Middleware to parse JSON bodies
 app.use(express.json());
 
@@ -47,5 +48,7 @@ app.use(ContactRoutes)
 app.use(BannerRoutes)
 
 app.listen(port, () => {
+  console.log("process.env.DB_NAME-->>", process.env.DB_NAME)
+
   console.log(`Server is running at http://localhost:${port}`);
 });
