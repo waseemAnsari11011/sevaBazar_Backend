@@ -23,6 +23,10 @@ const variationSchema = new mongoose.Schema({
         default: 0,
         min: 0
     },
+    image: {
+        type: String, // Assuming the image is stored as a URL or path
+        default: null // You can change the default value as per your application's logic
+    },
     parentVariation: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Product.variations',

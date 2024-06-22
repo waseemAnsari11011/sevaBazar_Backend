@@ -7,7 +7,8 @@ const mongoose = require('mongoose');
 exports.addProduct = async (req, res) => {
     try {
         const { name, description, category, vendor, availableLocalities } = req.body;
-        const images = req.files.map(file => file.path);
+        const images = req.files.filter(file => file.fieldname.startsWith('productImage')).map(file => file.path);
+        const variationImages = req.files.filter(file => file.fieldname.startsWith('variationImage')).map(file => file.path);
         const variations = JSON.parse(req.body.variations);
 
         if (!variations || variations.length === 0) {
@@ -37,7 +38,8 @@ exports.addProduct = async (req, res) => {
                 price: parseInt(variation.price),  // Convert price to integer
                 discount: parseInt(variation.discount),  // Convert discount to integer
                 quantity: parseInt(variation.quantity),  // Convert quantity to integer
-                parentVariation: null  // Initialize parentVariation as null
+                image: variationImages[index],  // Assign the corresponding image
+                parentVariation: null,  // Initialize parentVariation as null,
             };
 
             if (variation.parentVariation !== null && variation.parentVariation !== '') {
@@ -101,6 +103,7 @@ exports.addProduct = async (req, res) => {
     }
 };
 
+
 // Controller function to update an existing product
 exports.updateProduct = async (req, res) => {
     try {
@@ -114,8 +117,10 @@ exports.updateProduct = async (req, res) => {
             vendor,
             availableLocalities,
             variations,
-            existingImages
+            existingImages,
+            existingVariationImages
         } = req.body;
+
 
         // Find the product by ID
         const product = await Product.findById(id);
@@ -128,7 +133,7 @@ exports.updateProduct = async (req, res) => {
 
         // Delete product images from the file system that are not in existingImages
         product.images.forEach(imagePath => {
-            if (!existingImages.includes(imagePath)) {
+            if (!existingImages?.includes(imagePath)) {
                 const fullPath = path.join(imagePath); // Adjust the path accordingly
                 fs.unlink(fullPath, err => {
                     if (err) {
@@ -151,7 +156,7 @@ exports.updateProduct = async (req, res) => {
             }
         });
 
-        console.log("variationMap-->>", variationMap)
+        console.log("existingImages-->>", existingImages)
 
         // Validate and structure the variations array
         const formattedVariations = parsedVariations.map(variation => {
@@ -220,16 +225,52 @@ exports.updateProduct = async (req, res) => {
         product.availableLocalities = availableLocalities || product.availableLocalities;
         product.quantity = totalQuantity;
 
-        // Update variations
-        product.variations = formattedVariations;
+
+
+        console.log("req.files-->>", req.files)
 
         // Combine existing images and new uploaded images if there are new images
         if (req.files && req.files.length > 0) {
-            const newImages = req.files.map(file => file.path);
+            const newImages = req.files.filter(file => file.fieldname.startsWith('productImage')).map(file => file.path);
+            console.log("newImages->", newImages)
+
             product.images = existingImages ? existingImages.concat(newImages) : newImages;
+
+            // Update variation images separately
+            req.files.forEach(file => {
+                const variationImage_ = file.fieldname.startsWith('variationImage_')
+                // console.log("variationImage_-->>", variationImage_)
+                if (file.fieldname.startsWith('variationImage_')) {
+                    const index = parseInt(file.fieldname.split('_')[1]);
+                    // console.log("index-->>", index)
+
+                    // console.log("formattedVariations[index]-->>", formattedVariations[index])
+
+                    if (formattedVariations[index]) {
+                        formattedVariations[index].image = file.path;
+                    }
+                }
+            });
         } else {
             product.images = existingImages || product.images;
+
+
         }
+
+        if (existingVariationImages) {
+            existingVariationImages.map((image, index) => {
+                if (formattedVariations[index]) {
+                    formattedVariations[index].image = image;
+                }
+            })
+        }
+
+
+
+
+        // Update variations
+        product.variations = formattedVariations;
+
 
         // Save the updated product to the database
         const updatedProduct = await product.save();
