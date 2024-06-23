@@ -8,7 +8,10 @@ exports.addProduct = async (req, res) => {
     try {
         const { name, description, category, vendor, availableLocalities } = req.body;
         const images = req.files.filter(file => file.fieldname.startsWith('productImage')).map(file => file.path);
-        const variationImages = req.files.filter(file => file.fieldname.startsWith('variationImage')).map(file => file.path);
+        const variationImages = req.files.filter(file => file.fieldname.startsWith('variationImage'));
+
+        console.log("variationImages-->>", variationImages)
+        console.log("variationImages0-->>", variationImages.filter(file => file.fieldname.includes(`variationImage_0`)).map(file => file.path))
         const variations = JSON.parse(req.body.variations);
 
         if (!variations || variations.length === 0) {
@@ -27,7 +30,6 @@ exports.addProduct = async (req, res) => {
             availableLocalities
         });
 
-        // Temporary map to store created variation references by index and to sum child quantities
         const variationReferences = {};
         const childQuantities = {};
 
@@ -35,22 +37,17 @@ exports.addProduct = async (req, res) => {
         const formattedVariations = variations.map((variation, index) => {
             const formattedVariation = {
                 attributes: variation.attributes,
-                price: parseInt(variation.price),  // Convert price to integer
-                discount: parseInt(variation.discount),  // Convert discount to integer
-                quantity: parseInt(variation.quantity),  // Convert quantity to integer
-                image: variationImages[index],  // Assign the corresponding image
+                price: variation.price?parseInt(variation.price):0,  // Convert price to integer
+                discount: variation.discount? parseInt(variation.discount):0,  // Convert discount to integer
+                quantity: variation.quantity? parseInt(variation.quantity):0,  // Convert quantity to integer
+                images: variationImages.filter(file => file.fieldname.includes(`variationImage_${index}`)).map(file => file.path) ,  // Assign the corresponding images
                 parentVariation: null,  // Initialize parentVariation as null,
             };
 
             if (variation.parentVariation !== null && variation.parentVariation !== '') {
-                // Extract the parent variation index from the parentVariation field
                 const parentIndex = variation.parentVariation.match(/\d+/)[0];
-
-                // Check if parent variation already exists in the map
                 if (variationReferences[parentIndex]) {
                     formattedVariation.parentVariation = variationReferences[parentIndex]._id;
-
-                    // Sum the quantities of child variations
                     if (!childQuantities[parentIndex]) {
                         childQuantities[parentIndex] = 0;
                     }
@@ -62,14 +59,12 @@ exports.addProduct = async (req, res) => {
                 }
             }
 
-            // Create the variation and store the reference using the index
             const createdVariation = newProduct.variations.create(formattedVariation);
             variationReferences[index + 1] = createdVariation;
 
             return createdVariation;
         });
 
-        // Validate child quantities against parent quantities
         for (const parentIndex in childQuantities) {
             if (childQuantities[parentIndex] > variationReferences[parentIndex].quantity) {
                 return res.status(400).json({
@@ -78,18 +73,13 @@ exports.addProduct = async (req, res) => {
             }
         }
 
-        // Add variations to product
         newProduct.variations = formattedVariations;
-
-        // Set root level fields
         newProduct.price = formattedVariations[0].price;
         newProduct.discount = formattedVariations[0].discount;
         newProduct.quantity = variations.reduce((sum, variation) => sum + parseInt(variation.quantity), 0);
 
-        // Save the product to the database
         const savedProduct = await newProduct.save();
 
-        // Send response
         res.status(201).json({
             message: 'Product created successfully',
             product: savedProduct
@@ -102,6 +92,7 @@ exports.addProduct = async (req, res) => {
         });
     }
 };
+
 
 
 // Controller function to update an existing product
@@ -120,7 +111,6 @@ exports.updateProduct = async (req, res) => {
             existingImages,
             existingVariationImages
         } = req.body;
-
 
         // Find the product by ID
         const product = await Product.findById(id);
@@ -156,20 +146,15 @@ exports.updateProduct = async (req, res) => {
             }
         });
 
-        console.log("existingImages-->>", existingImages)
-
         // Validate and structure the variations array
         const formattedVariations = parsedVariations.map(variation => {
             let parentVariationId = null;
             if (variation.parentVariation && !mongoose.Types.ObjectId.isValid(variation.parentVariation)) {
                 const parentAttr = variation.parentVariation.split(' - ');
-                console.log("parentAttr-->>", parentAttr)
                 if (parentAttr.length === 2) {
                     const parentAttr1 = parentAttr[1].split(": ")
                     const key = `${parentAttr1[0]}:${parentAttr1[1]}`
-                    console.log("key-->>", key)
                     parentVariationId = variationMap[key];
-                    console.log("parentVariationId-->>", parentVariationId)
                 }
             } else {
                 parentVariationId = variation.parentVariation ? new mongoose.Types.ObjectId(variation.parentVariation) : null;
@@ -177,11 +162,12 @@ exports.updateProduct = async (req, res) => {
 
             return {
                 attributes: variation.attributes,
-                price: parseInt(variation.price),
-                discount: parseInt(variation.discount),
-                quantity: parseInt(variation.quantity),
+                price: variation.price ? parseInt(variation.price):0,
+                discount: variation.discount? parseInt(variation.discount):0,
+                quantity: variation.quantity?parseInt(variation.quantity):0,
                 parentVariation: parentVariationId ? new mongoose.Types.ObjectId(parentVariationId) : null,
-                _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId()
+                _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId(),
+                images: []
             };
         });
 
@@ -217,7 +203,7 @@ exports.updateProduct = async (req, res) => {
 
         // Update the product details
         product.name = name || product.name;
-        product.price = parseInt(price) || formattedVariations[0].price;
+        product.price = price? parseInt(price) || formattedVariations[0].price : 0
         product.discount = parseInt(discount) || formattedVariations[0].discount;
         product.description = description || product.description;
         product.category = category || product.category;
@@ -225,52 +211,38 @@ exports.updateProduct = async (req, res) => {
         product.availableLocalities = availableLocalities || product.availableLocalities;
         product.quantity = totalQuantity;
 
-
-
         console.log("req.files-->>", req.files)
 
-        // Combine existing images and new uploaded images if there are new images
+        // Handle new product images and variation images
         if (req.files && req.files.length > 0) {
             const newImages = req.files.filter(file => file.fieldname.startsWith('productImage')).map(file => file.path);
-            console.log("newImages->", newImages)
-
             product.images = existingImages ? existingImages.concat(newImages) : newImages;
 
-            // Update variation images separately
             req.files.forEach(file => {
-                const variationImage_ = file.fieldname.startsWith('variationImage_')
-                // console.log("variationImage_-->>", variationImage_)
                 if (file.fieldname.startsWith('variationImage_')) {
-                    const index = parseInt(file.fieldname.split('_')[1]);
-                    // console.log("index-->>", index)
-
-                    // console.log("formattedVariations[index]-->>", formattedVariations[index])
-
-                    if (formattedVariations[index]) {
-                        formattedVariations[index].image = file.path;
+                    const [variationIndex, imageIndex] = file.fieldname.split('_').slice(1).map(Number);
+                    if (formattedVariations[variationIndex]) {
+                        formattedVariations[variationIndex].images[imageIndex] = file.path;
                     }
                 }
             });
         } else {
             product.images = existingImages || product.images;
-
-
         }
 
+        // Handle existing variation images
         if (existingVariationImages) {
-            existingVariationImages.map((image, index) => {
-                if (formattedVariations[index]) {
-                    formattedVariations[index].image = image;
+            existingVariationImages.forEach((imageList, variationIndex) => {
+                if (formattedVariations[variationIndex]) {
+                    imageList.forEach((image, imageIndex) => {
+                        formattedVariations[variationIndex].images[imageIndex] = image;
+                    });
                 }
-            })
+            });
         }
-
-
-
 
         // Update variations
         product.variations = formattedVariations;
-
 
         // Save the updated product to the database
         const updatedProduct = await product.save();

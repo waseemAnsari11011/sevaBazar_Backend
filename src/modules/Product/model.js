@@ -10,6 +10,7 @@ const variationSchema = new mongoose.Schema({
     price: {
         type: Number,
         required: true,
+        default: 0,
         min: 0
     },
     discount: {
@@ -23,9 +24,9 @@ const variationSchema = new mongoose.Schema({
         default: 0,
         min: 0
     },
-    image: {
-        type: String, // Assuming the image is stored as a URL or path
-        default: null // You can change the default value as per your application's logic
+    images: {
+        type: [String], // Assuming images are stored as URLs or paths
+        default: [] // Initialize with an empty array
     },
     parentVariation: {
         type: mongoose.Schema.Types.ObjectId,
