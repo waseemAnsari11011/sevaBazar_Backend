@@ -48,7 +48,5 @@ app.use(ContactRoutes)
 app.use(BannerRoutes)
 
 app.listen(port, () => {
-  console.log("process.env.DB_NAME-->>", process.env.DB_NAME)
-
   console.log(`Server is running at http://localhost:${port}`);
 });
