@@ -346,7 +346,8 @@ exports.getOrdersByVendor = async (req, res) => {
                         orderStatus: "$vendors.orderStatus",
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
-                        razorpay_payment_id: "$razorpay_payment_id"
+                        razorpay_payment_id: "$razorpay_payment_id",
+                        createdAt: "$createdAt"
                     },
                     products: {
                         $push: {
@@ -371,15 +372,17 @@ exports.getOrdersByVendor = async (req, res) => {
                     isPaymentVerified: "$_id.isPaymentVerified",
                     paymentStatus: "$_id.paymentStatus",
                     razorpay_payment_id: "$_id.razorpay_payment_id",
+                    createdAt: "$_id.createdAt",
                     vendors: {
                         vendor: "$_id.vendor",
                         orderStatus: "$_id.orderStatus",
                         products: "$products"
                     }
                 }
-            }
+            },
+            // Sort by createdAt in descending order
+            { $sort: { createdAt: -1 } }
         ]);
-
 
         res.status(200).json({
             success: true,
@@ -393,6 +396,7 @@ exports.getOrdersByVendor = async (req, res) => {
         });
     }
 };
+
 
 exports.getRecentOrdersByVendor = async (req, res) => {
     try {

@@ -409,22 +409,23 @@ exports.getProductsByCategoryId = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const userLocation = req.query.userLocation;
 
-        // Find all products that belong to the given category ID and filter by userLocation
-        const products = await Product.find({
-            category: categoryId,
+        // Define the match criteria for products
+        const matchCriteria = {
+            category: new mongoose.Types.ObjectId(categoryId),
             availableLocalities: { $in: [userLocation, 'all'] },
-            quantity: { $gt: 0 } // Add this filter to ensure quantity is greater than 0
-        })
-            .skip((page - 1) * limit)
-            .limit(limit);
+            quantity: { $gt: 0 } // Ensure quantity is greater than 0
+        };
 
+        // Perform the aggregation query
+        const products = await Product.aggregate([
+            { $match: matchCriteria },
+            { $sample: { size: limit } }, // Randomly sample 'limit' number of documents
+            { $skip: (page - 1) * limit }, // Skip documents for pagination
+            { $limit: limit } // Limit the number of documents returned
+        ]);
 
         // Count the total number of products in the category with the specified location filter
-        const totalProducts = await Product.countDocuments({
-            category: categoryId,
-            availableLocalities: { $in: [userLocation, 'all'] },
-            quantity: { $gt: 0 }
-        });
+        const totalProducts = await Product.countDocuments(matchCriteria);
 
         // Send the products in the response with pagination metadata
         res.status(200).json({
