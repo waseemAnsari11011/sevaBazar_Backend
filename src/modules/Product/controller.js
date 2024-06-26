@@ -6,12 +6,11 @@ const mongoose = require('mongoose');
 // Controller function to add a new product
 exports.addProduct = async (req, res) => {
     try {
-        const { name, description, category, vendor, availableLocalities } = req.body;
+        const { name, description, category, vendor, availableLocalities, tags, isReturnAllowed } = req.body;
         const images = req.files.filter(file => file.fieldname.startsWith('productImage')).map(file => file.path);
         const variationImages = req.files.filter(file => file.fieldname.startsWith('variationImage'));
 
-        console.log("variationImages-->>", variationImages)
-        console.log("variationImages0-->>", variationImages.filter(file => file.fieldname.includes(`variationImage_0`)).map(file => file.path))
+       
         const variations = JSON.parse(req.body.variations);
 
         if (!variations || variations.length === 0) {
@@ -27,7 +26,9 @@ exports.addProduct = async (req, res) => {
             description,
             category,
             vendor,
-            availableLocalities
+            availableLocalities,
+            tags,
+            isReturnAllowed
         });
 
         const variationReferences = {};
@@ -107,10 +108,14 @@ exports.updateProduct = async (req, res) => {
             category,
             vendor,
             availableLocalities,
+            tags,
+            isReturnAllowed,
             variations,
             existingImages,
             existingVariationImages
         } = req.body;
+
+        console.log("tags-->>", tags)
 
         // Find the product by ID
         const product = await Product.findById(id);
@@ -209,6 +214,8 @@ exports.updateProduct = async (req, res) => {
         product.category = category || product.category;
         product.vendor = vendor || product.vendor;
         product.availableLocalities = availableLocalities || product.availableLocalities;
+        product.tags = tags? tags :[],
+        product.isReturnAllowed = isReturnAllowed || product.isReturnAllowed;
         product.quantity = totalQuantity;
 
         console.log("req.files-->>", req.files)
@@ -267,7 +274,7 @@ exports.updateProduct = async (req, res) => {
 
 
 // Controller function to get all products
-exports.getAllProducts = async (req, res) => {
+exports.getAllProductsVendor = async (req, res) => {
     try {
         const vendorId = req.params.vendorId;
 
@@ -285,6 +292,34 @@ exports.getAllProducts = async (req, res) => {
             message: 'Failed to retrieve products',
             error: error.message
         });
+    }
+};
+
+exports.getAllProducts = async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
+        const userLocation = req.query.userLocation;
+
+        // Construct the filter for availableLocalities
+        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } } : { quantity: { $gt: 0 } };
+
+        // Find the most recently added products with the location filter
+        const products = await Product.find(locationFilter)
+            .skip((page - 1) * limit)
+            .limit(limit);
+
+        // Count the total number of products with the location filter
+        const totalProducts = await Product.countDocuments(locationFilter);
+
+        res.json({
+            total: totalProducts,
+            page,
+            limit,
+            products
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
     }
 };
 
@@ -575,14 +610,15 @@ exports.fuzzySearchProducts = async (req, res) => {
             ...locationFilter,
             $or: [
                 { name: { $regex: regexQuery } },
-                { description: { $regex: regexQuery } }
+                { description: { $regex: regexQuery } },
+                { tags: { $regex: regexQuery } } // Include tags in the search
             ]
         };
 
-        // Find products that match the search query in the 'name' or 'description' and match the location filter
+        // Find products that match the search query in the 'name', 'description' or 'tags', and match the location filter
         const results = await Product.find(query)
-        // .skip((page - 1) * limit)
-        // .limit(parseInt(limit));
+            .skip((page - 1) * limit)
+            .limit(parseInt(limit));
 
         const totalResults = await Product.countDocuments(query);
 
@@ -596,6 +632,7 @@ exports.fuzzySearchProducts = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
 
 
 exports.updateVariationQuantity = async (req, res) => {

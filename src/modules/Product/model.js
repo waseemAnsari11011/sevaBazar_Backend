@@ -42,6 +42,14 @@ const productSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    tags: [{
+        type: String,
+        required: true
+    }],
+    isReturnAllowed: {
+        type: Boolean,
+        required: true
+    },
     images: {
         type: [String],
         validate: [arrayLimit, '{PATH} exceeds the limit of 10']

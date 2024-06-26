@@ -7,7 +7,8 @@ const productController = require('./controller'); // Adjust the path as necessa
 router.post('/products', upload('uploads/products'), productController.addProduct);
 router.put('/products/:id', upload('uploads/products'), productController.updateProduct);
 router.delete('/products/:id', productController.deleteProduct);
-router.get('/products/:vendorId', productController.getAllProducts);
+router.get('/products/:vendorId', productController.getAllProductsVendor);
+router.get('/get-all-products/', productController.getAllProducts);
 router.get('/products-low-quantity/:vendorId', productController.getProductsLowQuantity);
 
 router.get('/single-product/:id', productController.getProductById);
