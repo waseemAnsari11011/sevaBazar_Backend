@@ -24,6 +24,10 @@ const vendorSchema = new Schema({
       type: String,
       required: true
     },
+    alternativeContactNumber: {
+      type: String,
+      required: true
+    },
     address: {
       addressLine1: {
         type: String,
@@ -63,7 +67,7 @@ const vendorSchema = new Schema({
 
 // Method to compare passwords
 vendorSchema.methods.comparePassword = async function (candidatePassword) {
-  console.log("candidatePassword", candidatePassword)
+  // console.log("candidatePassword", candidatePassword)
   return bcrypt.compare(candidatePassword, this.password);
 };
 

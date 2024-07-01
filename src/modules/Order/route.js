@@ -9,12 +9,15 @@ router.post('/razorpay-verify-payment', orderController.updatePaymentStatus);
 router.post('/manually-verify-payment', orderController.updatePaymentStatusManually);
 
 router.get('/order/vendor/:vendorId', orderController.getOrdersByVendor);
+router.get('/new-order/vendor/:vendorId', orderController.getNewOrdersCountByVendor);
 router.get('/order/recent-order/:vendorId', orderController.getRecentOrdersByVendor);
 
 router.put('/order/status/:orderId/vendor/:vendorId', orderController.updateOrderStatus);
 // router.get('/orders/customer/:customerId', orderController.getOrdersByCustomerAndStatus);
 // Route to get all orders by customer ID
 router.get('/orders/customer/:customerId', orderController.getOrdersByCustomerId);
+router.get('/mark-viewed/orders/:vendorId', orderController.markOrderViewed);
+
 
 
 module.exports = router;

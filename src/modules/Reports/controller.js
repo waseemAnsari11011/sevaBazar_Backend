@@ -1,17 +1,40 @@
 const Order = require('../Order/model');  // Adjust the path according to your project structure
-
+const Vendor = require('../Vendor/model');
+const mongoose = require('mongoose');
 
 exports.getTotalSales = async (req, res) => {
     try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
+        // Prepare the aggregation pipeline
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
         const calculateSales = async (startDate) => {
             const sales = await Order.aggregate([
                 { $match: { createdAt: { $gte: startDate } } },
-                { $unwind: '$vendors' },
+                ...pipeline,
                 { $unwind: '$vendors.products' },
                 {
                     $group: {
@@ -40,12 +63,34 @@ exports.getTotalSales = async (req, res) => {
 
 exports.getMonthlySales = async (req, res) => {
     try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
         const now = new Date();
         const startOfYear = new Date(now.getFullYear(), 0, 1);
 
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+
+        // Prepare the aggregation pipeline
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
+
         const salesData = await Order.aggregate([
             { $match: { createdAt: { $gte: startOfYear } } },
-            { $unwind: '$vendors' },
+            ...pipeline,
             { $unwind: '$vendors.products' },
             {
                 $group: {
@@ -74,14 +119,34 @@ exports.getMonthlySales = async (req, res) => {
 
 exports.getOrderCounts = async (req, res) => {
     try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        // Prepare the aggregation pipeline
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
 
         const calculateOrderCount = async (startDate) => {
             const orderCount = await Order.aggregate([
                 { $match: { createdAt: { $gte: startDate } } },
+                ...pipeline,
                 {
                     $group: {
                         _id: null,
@@ -109,11 +174,32 @@ exports.getOrderCounts = async (req, res) => {
 
 exports.getMonthlyOrderCounts = async (req, res) => {
     try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
         const now = new Date();
         const startOfYear = new Date(now.getFullYear(), 0, 1);
 
+         // Prepare the aggregation pipeline
+         const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
         const orderData = await Order.aggregate([
             { $match: { createdAt: { $gte: startOfYear } } },
+            ...pipeline,
             {
                 $group: {
                     _id: { $month: "$createdAt" },

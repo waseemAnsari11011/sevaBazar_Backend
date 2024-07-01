@@ -112,7 +112,7 @@ exports.vendorLogin = async (req, res) => {
 
     // Check if password matches
     const isPasswordMatch = await vendor.comparePassword(password);
-    console.log("isPasswordMatch==>>", isPasswordMatch);
+    // console.log("isPasswordMatch==>>", isPasswordMatch);
 
     if (!isPasswordMatch) {
       return res.status(401).json({ message: 'Invalid email or password' });
