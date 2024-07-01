@@ -4,10 +4,10 @@ const reportController = require('../Reports/controller');
 
 // Create a new order
 
-router.get('/get-sales', reportController.getTotalSales);
-router.get('/monthly-sales', reportController.getMonthlySales);
-router.get('/orders-counts', reportController.getOrderCounts);
-router.get('/monthly-orders-counts', reportController.getMonthlyOrderCounts);
+router.get('/get-sales/:vendorId', reportController.getTotalSales);
+router.get('/monthly-sales/:vendorId', reportController.getMonthlySales);
+router.get('/orders-counts/:vendorId', reportController.getOrderCounts);
+router.get('/monthly-orders-counts/:vendorId', reportController.getMonthlyOrderCounts);
 
 
 module.exports = router;

@@ -3,6 +3,7 @@ const Product = require('../Product/model');
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const Vendor = require('../Vendor/model');
 
 //razorpay
 const razorpay = new Razorpay({
@@ -193,7 +194,7 @@ exports.createOrder = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
-    console.log("createOrder--->>")
+    // console.log("createOrder--->>")
     try {
         const { customer, vendors, shippingAddress } = req.body;
 
@@ -227,7 +228,7 @@ exports.createOrder = async (req, res) => {
         // Update product quantities and save the order to the database
         for (const vendor of vendors) {
             for (const productInfo of vendor.products) {
-                console.log("ordered variations-->>", productInfo.variations);
+                // console.log("ordered variations-->>", productInfo.variations);
 
                 const product = await Product.findById(productInfo.product);
                 if (!product) {
@@ -245,7 +246,7 @@ exports.createOrder = async (req, res) => {
                         // Decrease the quantity of the matching variation by the ordered quantity
                         productVariation.quantity -= orderedVariation.quantity;
 
-                        console.log("productVariation.quantity-->>", productVariation.quantity)
+                        // console.log("productVariation.quantity-->>", productVariation.quantity)
 
                         // Check for negative quantity and handle it appropriately if needed
                         if (productVariation.quantity < 0) {
@@ -295,12 +296,27 @@ exports.getOrdersByVendor = async (req, res) => {
     try {
         const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
 
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
         const vendorOrders = await Order.aggregate([
-            // Unwind the vendors array to work with individual vendor documents
-            { $unwind: "$vendors" },
-            // Match only those documents where the vendor ID matches
-            { $match: { "vendors.vendor": vendorId } },
-            // Lookup to join customer details
+            ...pipeline,
             {
                 $lookup: {
                     from: "customers", // The name of the customers collection
@@ -339,7 +355,7 @@ exports.getOrdersByVendor = async (req, res) => {
             {
                 $group: {
                     _id: {
-                        orderId: "$_id",
+                        orderId: "$orderId",
                         customer: "$customerDetails",
                         shippingAddress: "$shippingAddress",
                         vendor: "$vendorDetails",
@@ -347,7 +363,8 @@ exports.getOrdersByVendor = async (req, res) => {
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
                         razorpay_payment_id: "$razorpay_payment_id",
-                        createdAt: "$createdAt"
+                        createdAt: "$createdAt",
+                        is_new: "$is_new"
                     },
                     products: {
                         $push: {
@@ -373,6 +390,7 @@ exports.getOrdersByVendor = async (req, res) => {
                     paymentStatus: "$_id.paymentStatus",
                     razorpay_payment_id: "$_id.razorpay_payment_id",
                     createdAt: "$_id.createdAt",
+                    is_new: "$_id.is_new",
                     vendors: {
                         vendor: "$_id.vendor",
                         orderStatus: "$_id.orderStatus",
@@ -396,6 +414,22 @@ exports.getOrdersByVendor = async (req, res) => {
         });
     }
 };
+exports.getNewOrdersCountByVendor = async (req, res) => {
+    try {
+      const vendorId = req.params.vendorId; // Assuming vendorId is passed as a URL parameter
+  
+      // Count new orders for the specific vendor
+      const newOrdersCount = await Order.countDocuments({
+        'vendors.vendor': vendorId,
+        is_new: true
+      });
+  
+      res.status(200).json({ newOrdersCount });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: 'An error occurred while retrieving new orders count.' });
+    }
+  };
 
 
 exports.getRecentOrdersByVendor = async (req, res) => {
@@ -615,6 +649,25 @@ exports.getOrdersByCustomerId = async (req, res) => {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
+
+exports.markOrderViewed = async (req, res) => {
+    console.log("markOrderViewed is called")
+    try {
+        const vendorId = req.params.vendorId;
+        
+        // Update only the orders for the given vendor to set is_new to false
+        await Order.updateMany(
+            { "vendors.vendor": vendorId, is_new: true },
+            { $set: { is_new: false } }
+        );
+
+        res.status(200).json({ message: 'Vendor-specific orders marked as viewed' });
+    } catch (error) {
+        res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
+    }
+};
+
+
 
 
 
