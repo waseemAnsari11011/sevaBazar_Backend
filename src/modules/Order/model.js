@@ -11,8 +11,9 @@ const orderSchema = new Schema({
     customer: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Customer',
-        required: true
+        required: true,
     },
+    name: { type: String },
     vendors: [{
         vendor: {
             type: mongoose.Schema.Types.ObjectId,
@@ -25,6 +26,7 @@ const orderSchema = new Schema({
                 ref: 'Product',
                 required: true
             },
+            name: { type: String },
             variations: {
                 type: Array,
             },

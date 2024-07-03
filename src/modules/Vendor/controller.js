@@ -35,7 +35,7 @@ exports.getAllVendors = async (req, res) => {
   try {
     // Fetch only vendors with the role 'vendor'
     const vendors = await Vendor.find({ role: 'vendor' });
-    console.log("vendors api", vendors)
+    // console.log("vendors api", vendors)
     res.status(200).send(vendors);
   } catch (error) {
     res.status(500).send(error);

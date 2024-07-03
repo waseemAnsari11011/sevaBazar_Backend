@@ -4,7 +4,8 @@ const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const Vendor = require('../Vendor/model');
-
+const Customer = require('../Customer/model')
+const emailService = require('../utils/emailService');
 //razorpay
 const razorpay = new Razorpay({
     key_id: process.env.KEY_ID,
@@ -194,16 +195,16 @@ exports.createOrder = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
-    // console.log("createOrder--->>")
     try {
         const { customer, vendors, shippingAddress } = req.body;
-
-        // console.log("vendor.products-->>", vendor.products)
 
         // Validate required fields
         if (!customer || !vendors || !shippingAddress) {
             return res.status(400).json({ error: 'All required fields must be provided' });
         }
+        const customerDetails = await Customer.findById(customer);
+        console.log("customerDetails--->", customerDetails)
+
 
         // Validate each vendor and their products
         for (const vendor of vendors) {
@@ -211,25 +212,17 @@ exports.createOrder = async (req, res) => {
                 return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
             }
             for (const product of vendor.products) {
-                console.log("product.variations", product.variations)
                 if (!product.product || !product.quantity || !product.price || !product.variations) {
                     return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
                 }
             }
         }
 
-        // Create a new order instance
-        const newOrder = new Order({
-            customer,
-            vendors,
-            shippingAddress
-        });
+
 
         // Update product quantities and save the order to the database
         for (const vendor of vendors) {
             for (const productInfo of vendor.products) {
-                // console.log("ordered variations-->>", productInfo.variations);
-
                 const product = await Product.findById(productInfo.product);
                 if (!product) {
                     return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
@@ -246,8 +239,6 @@ exports.createOrder = async (req, res) => {
                         // Decrease the quantity of the matching variation by the ordered quantity
                         productVariation.quantity -= orderedVariation.quantity;
 
-                        // console.log("productVariation.quantity-->>", productVariation.quantity)
-
                         // Check for negative quantity and handle it appropriately if needed
                         if (productVariation.quantity < 0) {
                             return res.status(400).json({ error: `Insufficient quantity for variation ${orderedVariation._id}` });
@@ -257,32 +248,54 @@ exports.createOrder = async (req, res) => {
                     }
                 }
 
-
-
                 // Sum the quantities of all variations
                 const totalQuantity = product.variations.reduce((sum, variation) =>
                     variation.parentVariation === null ? sum + variation.quantity : sum, 0);
 
                 // Update the root-level quantity of the product
                 product.quantity = totalQuantity;
-
+                productInfo.name = product.name
                 // Save the updated product document back to the database
                 await product.save();
             }
         }
 
+        // Create a new order instance
+        const newOrder = new Order({
+            customer,
+            vendors,
+            shippingAddress,
+            name: customerDetails.name
+        });
 
-
+        console.log("vendor-->>", vendors[0].products)
 
         // Save the order to the database
         const savedOrder = await newOrder.save();
+
+        // Send order confirmation email to customer
+        // await emailService.sendOrderConfirmationEmail(customer.email, savedOrder);
+
+        console.log("savedOrder-->>", savedOrder.vendors[0].products)
+
+        // Send new order notification email to each vendor
+        for (const vendor of vendors) {
+
+            const vendorId = new mongoose.Types.ObjectId(vendor.vendor);
+
+            // Fetch the vendor's role using the vendorId
+            const vendorDetails = await Vendor.findById(vendorId)
+
+            // console.log("vendor.vendor.email-->>", vendorDetails)
+
+            await emailService.sendNewOrderNotificationEmail(vendorDetails.email, savedOrder);
+        }
 
         await session.commitTransaction();
         session.endSession();
 
         res.status(201).json(savedOrder);
     } catch (error) {
-
         await session.abortTransaction();
         session.endSession();
         res.status(400).json({ error: error.message });
@@ -416,20 +429,22 @@ exports.getOrdersByVendor = async (req, res) => {
 };
 exports.getNewOrdersCountByVendor = async (req, res) => {
     try {
-      const vendorId = req.params.vendorId; // Assuming vendorId is passed as a URL parameter
-  
-      // Count new orders for the specific vendor
-      const newOrdersCount = await Order.countDocuments({
-        'vendors.vendor': vendorId,
-        is_new: true
-      });
-  
-      res.status(200).json({ newOrdersCount });
+        const vendorId = req.params.vendorId; // Assuming vendorId is passed as a URL parameter
+
+        // Count new orders for the specific vendor
+        const newOrdersCount = await Order.countDocuments({
+            'vendors.vendor': vendorId,
+            is_new: true
+        });
+
+        // console.log("newOrdersCount-->>", newOrdersCount)
+
+        res.status(200).json({ newOrdersCount });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: 'An error occurred while retrieving new orders count.' });
+        console.error(error);
+        res.status(500).json({ message: 'An error occurred while retrieving new orders count.' });
     }
-  };
+};
 
 
 exports.getRecentOrdersByVendor = async (req, res) => {
@@ -654,7 +669,7 @@ exports.markOrderViewed = async (req, res) => {
     console.log("markOrderViewed is called")
     try {
         const vendorId = req.params.vendorId;
-        
+
         // Update only the orders for the given vendor to set is_new to false
         await Order.updateMany(
             { "vendors.vendor": vendorId, is_new: true },
