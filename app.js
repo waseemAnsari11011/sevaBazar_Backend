@@ -13,6 +13,7 @@ const InquiryRoutes = require('./src/modules/Inquiry/route');
 const FaqsRoutes = require('./src/modules/HelpCenter/route');
 const ContactRoutes = require('./src/modules/Contactus/route');
 const BannerRoutes = require('./src/modules/Banner/route');
+const ChatOrder = require('./src/modules/ChatOrdrer/route');
 
 
 const app = express();
@@ -46,6 +47,7 @@ app.use(InquiryRoutes)
 app.use(FaqsRoutes)
 app.use(ContactRoutes)
 app.use(BannerRoutes)
+app.use(ChatOrder)
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
