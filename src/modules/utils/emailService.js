@@ -79,7 +79,58 @@ exports.sendNewOrderNotificationEmail = async (vendorEmail, orderDetails) => {
             <p>Thank you.</p>
         `
     };
-    
+
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('New order notification email sent to vendor');
+    } catch (error) {
+        console.error('Error sending new order notification email to vendor:', error);
+        throw error;
+    }
+};
+
+exports.sendNewChatOrderNotificationEmail = async (vendorEmail, orderDetails, customerDetails) => {
+    const rupeeSymbol = '\u20B9';
+console.log("vendorEmail-->>", vendorEmail)
+    const mailOptions = {
+        from: process.env.EMAIL,
+        to: vendorEmail,
+        subject: 'New Order Placed',
+        html: `
+            <p>Hello,</p>
+            <p>A new order has been placed. Here are the details:</p>
+            <ul>
+                <li><strong>Order ID:</strong> ${orderDetails.orderId}</li>
+                <li><strong>Customer:</strong> ${customerDetails.name}</li>
+                <li><strong>Phone:</strong> ${customerDetails.contactNumber}</li>
+                <li><strong>Shipping Address:</strong> <br>
+                    ${orderDetails.shippingAddress.address}<br>
+                    ${orderDetails.shippingAddress.city}, ${orderDetails.shippingAddress.state}, ${orderDetails.shippingAddress.country}<br>
+                    Postal Code: ${orderDetails.shippingAddress.postalCode}
+                </li>
+                <li><strong>Order Date:</strong> ${new Date(orderDetails.createdAt).toLocaleString()}</li>
+            </ul>
+            <p><strong>Products:</strong></p>
+            <table style="width: 100%; border-collapse: collapse; border: 1px solid #ccc;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="border: 1px solid #ccc; padding: 8px;">Order Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <tr>
+                <td>${orderDetails.orderMessage}</td>
+            </tr>
+                </tbody>
+            </table>
+            <br>
+            <p>Please process the order at your earliest convenience.</p>
+            <br>
+            <p>Thank you.</p>
+        `
+    };
+
 
     try {
         await transporter.sendMail(mailOptions);

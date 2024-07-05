@@ -69,6 +69,10 @@ const orderSchema = new Schema({
         type: Date,
         default: Date.now
     },
+    isPaymentVerified: {
+        type: Boolean,
+        default: false
+    },
 });
 
 // Middleware to generate unique orderId and set the vendor to admin

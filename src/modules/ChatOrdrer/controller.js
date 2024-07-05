@@ -2,6 +2,7 @@ const ChatOrder = require('./model'); // Adjust the path as necessary
 const Customer = require('../Customer/model'); // Assuming you have a Customer model
 const Vendor = require('../Vendor/model'); // Assuming you have a Customer model
 const mongoose = require('mongoose');
+const emailService = require('../utils/emailService');
 
 // Function to create a new ChatOrder
 const createChatOrder = async (req, res) => {
@@ -32,6 +33,18 @@ const createChatOrder = async (req, res) => {
 
         // Save the order to the database
         const savedOrder = await newChatOrder.save();
+
+        // console.log("savedOrder->", savedOrder)
+
+
+        // Fetch the vendor's role using the vendorId
+        const vendorDetails = await Vendor.findById(savedOrder.vendor)
+        const customerDetails = await Customer.findById(savedOrder.customer)
+
+        // console.log("vendorDetails->", vendorDetails)
+
+        await emailService.sendNewChatOrderNotificationEmail(vendorDetails.email, savedOrder, customerDetails);
+
 
         return res.status(201).json({ message: 'ChatOrder created successfully', order: savedOrder });
     } catch (error) {
@@ -68,7 +81,7 @@ const updateChatOrderStatus = async (req, res) => {
     const { orderId } = req.params;
     const { newStatus } = req.body;
 
-    // console.log("newStatus==>>", newStatus)
+    console.log("orderId, newStatus==>>", orderId, newStatus)
 
     try {
         // Find the admin vendor
@@ -81,9 +94,11 @@ const updateChatOrderStatus = async (req, res) => {
         // Find the order by ID and update the status for the admin vendor
         const order = await ChatOrder.findOneAndUpdate(
             { _id: orderId, vendor: adminVendor._id },
-            { $set: { orderStatus: newStatus?.newStatus } },
+            { $set: { orderStatus: newStatus } },
             { new: true }
         );
+
+        console.log("order-->>", order)
 
         if (!order) {
             return res.status(404).json({ error: 'Order not found or admin vendor not assigned to order' });
@@ -146,10 +161,12 @@ const getChatOrdersByVendor = async (req, res) => {
             {
                 $group: {
                     _id: {
-                        orderId: "$orderId",
+                        orderId: "$_id",
+                        shortId: "$orderId",
+                        orderStatus: "$orderStatus",
                         customer: "$customerDetails",
                         shippingAddress: "$shippingAddress",
-                        orderMessage:"$orderMessage",
+                        orderMessage: "$orderMessage",
                         vendor: "$vendorDetails",
                         orderStatus: "$orderStatus",
                         totalAmount: "$totalAmount",
@@ -165,13 +182,15 @@ const getChatOrdersByVendor = async (req, res) => {
                 $project: {
                     _id: 0,
                     orderId: "$_id.orderId",
+                    shortId: "$_id.shortId",
+                    orderStatus: "$_id.orderStatus",
                     customer: "$_id.customer",
                     shippingAddress: "$_id.shippingAddress",
                     isPaymentVerified: "$_id.isPaymentVerified",
                     paymentStatus: "$_id.paymentStatus",
                     createdAt: "$_id.createdAt",
                     is_new: "$_id.is_new",
-                    orderMessage:"$_id.orderMessage",
+                    orderMessage: "$_id.orderMessage",
                     totalAmount: "$_id.totalAmount",
                     vendors: {
                         vendor: "$_id.vendor",
@@ -219,7 +238,7 @@ const updateOrderAmountAndStatus = async (req, res) => {
         }
 
         const updatedOrder = await ChatOrder.findOneAndUpdate(
-            { orderId: chatOrderId }, // Find by orderId field
+            { _id: chatOrderId }, // Find by orderId field
             {
                 totalAmount: totalAmount,
                 orderStatus: 'Pending',
@@ -227,7 +246,7 @@ const updateOrderAmountAndStatus = async (req, res) => {
             },
             { new: true }
         );
-        
+
 
         console.log("updatedOrder-->>", updatedOrder)
 
@@ -251,10 +270,82 @@ const updateOrderAmountAndStatus = async (req, res) => {
     }
 };
 
+const updateChatPaymentStatusManually = async (req, res) => {
+    try {
+        console.log("updatePaymentStatus")
+        // Extract required fields from the request body
+        const { orderId, newStatus } = req.body;
+
+        console.log("orderId, newStatus-->>", orderId, newStatus)
+
+        // Ensure all required fields are present
+        if (!newStatus || !orderId) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Find the order in the database using the orderId
+        let order = await ChatOrder.findById(orderId);
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (newStatus === 'Paid') {
+            order.isPaymentVerified = true;
+            order.paymentStatus = 'Paid';
+        } else {
+            order.isPaymentVerified = false;
+            order.paymentStatus = 'Unpaid';
+        }
 
 
 
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        res.status(200).json(updatedOrder);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
 
 
 
-module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor , updateOrderAmountAndStatus};
+const getNewChatOrdersCountByVendor = async (req, res) => {
+    console.log("it is called?")
+    try {
+        const vendorId = req.params.vendorId; // Assuming vendorId is passed as a URL parameter
+
+        // Count new orders for the specific vendor
+        const newOrdersCount = await ChatOrder.countDocuments({
+            'vendor': vendorId,
+            is_new: true
+        });
+
+        console.log("newchatOrdersCount-->>", newOrdersCount)
+
+        res.status(200).json({ newOrdersCount });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'An error occurred while retrieving new orders count.' });
+    }
+};
+
+
+const markChatOrderViewed = async (req, res) => {
+    console.log("markOrderViewed is called")
+    try {
+        const vendorId = req.params.vendorId;
+
+        // Update only the orders for the given vendor to set is_new to false
+        await ChatOrder.updateMany(
+            { "vendor": vendorId, is_new: true },
+            { $set: { is_new: false } }
+        );
+
+        res.status(200).json({ message: 'Vendor-specific orders marked as viewed' });
+    } catch (error) {
+        res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
+    }
+};
+module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually , getNewChatOrdersCountByVendor, markChatOrderViewed};
