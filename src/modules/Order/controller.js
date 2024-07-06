@@ -368,7 +368,8 @@ exports.getOrdersByVendor = async (req, res) => {
             {
                 $group: {
                     _id: {
-                        orderId: "$orderId",
+                        orderId: "$_id",
+                        shortId:"$orderId",
                         customer: "$customerDetails",
                         shippingAddress: "$shippingAddress",
                         vendor: "$vendorDetails",
@@ -397,6 +398,7 @@ exports.getOrdersByVendor = async (req, res) => {
                 $project: {
                     _id: 0,
                     orderId: "$_id.orderId",
+                    shortId:"$_id.shortId",
                     customer: "$_id.customer",
                     shippingAddress: "$_id.shippingAddress",
                     isPaymentVerified: "$_id.isPaymentVerified",

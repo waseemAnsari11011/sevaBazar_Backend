@@ -247,8 +247,8 @@ const updateOrderAmountAndStatus = async (req, res) => {
             { new: true }
         );
 
+       
 
-        console.log("updatedOrder-->>", updatedOrder)
 
         if (!updatedOrder) {
             return res.status(404).json({
@@ -348,4 +348,4 @@ const markChatOrderViewed = async (req, res) => {
         res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
     }
 };
-module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually , getNewChatOrdersCountByVendor, markChatOrderViewed};
+module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually, getNewChatOrdersCountByVendor, markChatOrderViewed };
