@@ -11,6 +11,29 @@ const orderSchema = new Schema({
         type: String,
         required: true
     },
+    products: [{
+        name: { type: String },
+        quantity: {
+            type: Number,
+            required: true,
+            min: 1
+        },
+        price: {
+            type: Number,
+            required: true,
+            min: 0
+        },
+        discount: {
+            type: Number,
+            default: 0,
+            min: 0,
+            max: 100
+        },
+        totalAmount: {
+            type: Number,
+            min: 0
+        }
+    }],
     customer: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Customer',
@@ -46,7 +69,7 @@ const orderSchema = new Schema({
     },
     orderStatus: {
         type: String,
-        enum: ['In Review','Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],
+        enum: ['In Review', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],
         default: 'In Review'
     },
     is_new: {

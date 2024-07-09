@@ -27,7 +27,7 @@ exports.sendOrderConfirmationEmail = async (customerEmail, orderDetails) => {
     }
 };
 
-exports.sendNewOrderNotificationEmail = async (vendorEmail, orderDetails) => {
+exports.sendNewOrderNotificationEmail = async (vendorEmail, orderDetails, customerContactNumber) => {
     const mailOptions = {
         from: process.env.EMAIL,
         to: vendorEmail,
@@ -38,6 +38,7 @@ exports.sendNewOrderNotificationEmail = async (vendorEmail, orderDetails) => {
             <ul>
                 <li><strong>Order ID:</strong> ${orderDetails.orderId}</li>
                 <li><strong>Customer:</strong> ${orderDetails.name}</li>
+                <li><strong>Customer Number:</strong> ${customerContactNumber}</li>
                 <li><strong>Shipping Address:</strong> <br>
                     ${orderDetails.shippingAddress.address}<br>
                     ${orderDetails.shippingAddress.city}, ${orderDetails.shippingAddress.state}, ${orderDetails.shippingAddress.country}<br>

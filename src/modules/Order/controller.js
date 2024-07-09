@@ -276,7 +276,8 @@ exports.createOrder = async (req, res) => {
         // Send order confirmation email to customer
         // await emailService.sendOrderConfirmationEmail(customer.email, savedOrder);
 
-        console.log("savedOrder-->>", savedOrder.vendors[0].products)
+
+
 
         // Send new order notification email to each vendor
         for (const vendor of vendors) {
@@ -288,7 +289,7 @@ exports.createOrder = async (req, res) => {
 
             // console.log("vendor.vendor.email-->>", vendorDetails)
 
-            await emailService.sendNewOrderNotificationEmail(vendorDetails.email, savedOrder);
+            await emailService.sendNewOrderNotificationEmail(vendorDetails.email, savedOrder, customerDetails.contactNumber);
         }
 
         await session.commitTransaction();
@@ -660,7 +661,9 @@ exports.getOrdersByCustomerId = async (req, res) => {
             .populate('customer')
             .populate('vendors.vendor')
             .populate('vendors.products.product')
+            .sort({ createdAt: -1 }) // Sort by createdAt in descending order (latest to oldest)
             .exec();
+
         res.status(200).json(orders);
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error: error.message });

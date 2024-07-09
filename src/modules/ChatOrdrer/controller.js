@@ -53,6 +53,65 @@ const createChatOrder = async (req, res) => {
     }
 };
 
+const updateChatOrder = async (req, res) => {
+    try {
+        const { orderId, products } = req.body;
+
+        // Validate required fields
+        if (!orderId || !products || !Array.isArray(products) || products.length === 0) {
+            return res.status(400).json({ message: 'Missing required fields' });
+        }
+
+        // Find the order by orderId
+        const order = await ChatOrder.findOne({_id: orderId });
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        // Update the products and calculate the total amount
+        order.products = products;
+        order.totalAmount = products.reduce((total, product) => {
+            // Calculate the subtotal for each product considering discounts
+            const subtotal = product.price * product.quantity * (1 - product.discount / 100);
+            // Add the subtotal to the running total
+            return total + subtotal;
+        }, 0);
+        
+        // Round the totalAmount to two decimal places
+        order.totalAmount = parseFloat(order.totalAmount.toFixed(2));
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        return res.status(200).json({ message: 'ChatOrder updated successfully', order: updatedOrder });
+    } catch (error) {
+        console.error('Error updating chat order:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+const getChatOrder = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        // Find the order by orderId
+        const order = await ChatOrder.findOne({_id: orderId }).populate('customer').populate('vendor');
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        return res.status(200).json(order);
+    } catch (error) {
+        console.error('Error fetching chat order:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+
+
+
+
+
+
 // Function to get all ChatOrders of a particular customer
 const getChatOrdersByCustomer = async (req, res) => {
     try {
@@ -172,6 +231,7 @@ const getChatOrdersByVendor = async (req, res) => {
                         totalAmount: "$totalAmount",
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
+                        products:"$products",
                         createdAt: "$createdAt",
                         is_new: "$is_new"
                     }
@@ -188,6 +248,7 @@ const getChatOrdersByVendor = async (req, res) => {
                     shippingAddress: "$_id.shippingAddress",
                     isPaymentVerified: "$_id.isPaymentVerified",
                     paymentStatus: "$_id.paymentStatus",
+                    products:"$_id.products",
                     createdAt: "$_id.createdAt",
                     is_new: "$_id.is_new",
                     orderMessage: "$_id.orderMessage",
@@ -348,4 +409,4 @@ const markChatOrderViewed = async (req, res) => {
         res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
     }
 };
-module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually, getNewChatOrdersCountByVendor, markChatOrderViewed };
+module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually, getNewChatOrdersCountByVendor, markChatOrderViewed, updateChatOrder, getChatOrder };
