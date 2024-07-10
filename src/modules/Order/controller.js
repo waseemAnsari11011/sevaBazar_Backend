@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const Vendor = require('../Vendor/model');
 const Customer = require('../Customer/model')
 const emailService = require('../utils/emailService');
+const { sendPushNotification } = require('../utils/pushNotificationUtil');
+
 //razorpay
 const razorpay = new Razorpay({
     key_id: process.env.KEY_ID,
@@ -550,7 +552,7 @@ exports.updateOrderStatus = async (req, res) => {
     const { orderId, vendorId } = req.params;
     const { newStatus } = req.body;
 
-    console.log(orderId, vendorId, newStatus)
+    console.log(orderId, vendorId, newStatus);
 
     try {
         // Find the order by ID and update the status for the specific vendor
@@ -562,6 +564,20 @@ exports.updateOrderStatus = async (req, res) => {
 
         if (!order) {
             return res.status(404).json({ error: 'Order or vendor not found' });
+        }
+
+        // Assuming you have a method to get the device token of the vendor
+        // const vendor = order.vendors.find(v => v.vendor.toString() === vendorId);
+        if (true) {
+            const token = 'cAedDln3QPeJ6FVgzXtaFF:APA91bHVgCgNDSYg-j-PiOQ14UZ7863bljKzY0bzMgKUotImYGNseM8qnvUHfgjgfzfmcQlsql1L0y0Uh-r86ctXyBGFUVYm1NYgy0SUtevWB5S9KpM1mGXmSBFm5_vRS9QKHFTi_tNO'
+            const title = 'Order Status Updated';
+            const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
+            try {
+               let res = await sendPushNotification(token, title, body);
+               console.log("push-->", res)
+            } catch (error) {
+                console.error('Error sending push notification:', error);
+            }
         }
 
         res.json(order);
