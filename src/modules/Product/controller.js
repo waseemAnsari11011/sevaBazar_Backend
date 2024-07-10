@@ -578,8 +578,6 @@ exports.getDiscountedProducts = async (req, res) => {
 
         const totalDiscountedProducts = await Product.countDocuments(query);
 
-        console.log("totalDiscountedProducts-->>", totalDiscountedProducts)
-
         res.json({
             total: totalDiscountedProducts,
             page,
