@@ -3,6 +3,7 @@ const Customer = require('../Customer/model'); // Assuming you have a Customer m
 const Vendor = require('../Vendor/model'); // Assuming you have a Customer model
 const mongoose = require('mongoose');
 const emailService = require('../utils/emailService');
+const { sendPushNotification } = require('../utils/pushNotificationUtil');
 
 // Function to create a new ChatOrder
 const createChatOrder = async (req, res) => {
@@ -63,7 +64,7 @@ const updateChatOrder = async (req, res) => {
         }
 
         // Find the order by orderId
-        const order = await ChatOrder.findOne({_id: orderId });
+        const order = await ChatOrder.findOne({ _id: orderId });
         if (!order) {
             return res.status(404).json({ message: 'Order not found' });
         }
@@ -76,11 +77,32 @@ const updateChatOrder = async (req, res) => {
             // Add the subtotal to the running total
             return total + subtotal;
         }, 0);
-        
+
         // Round the totalAmount to two decimal places
         order.totalAmount = parseFloat(order.totalAmount.toFixed(2));
         // Save the updated order
         const updatedOrder = await order.save();
+
+        if (products) {
+            // Extract customer ID from the order
+            const customerId = order.customer._id;
+            // Retrieve the customer from database to get FCM token
+            const customer = await Customer.findById(customerId);
+            if (!customer) {
+                return res.status(404).json({ error: 'Customer not found' });
+            }
+            const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
+            const title = 'Check Total Amount';
+            const body = `Your order: ${updatedOrder.orderMessage}. Total Amount : ₹${updatedOrder.totalAmount}.`;
+            try {
+                // Assuming you have a function or service to send push notifications
+                let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+                console.log("Push notification response:", pushNotificationRes);
+            } catch (error) {
+                console.error('Error sending push notification:', error);
+            }
+    
+        }
 
         return res.status(200).json({ message: 'ChatOrder updated successfully', order: updatedOrder });
     } catch (error) {
@@ -94,7 +116,7 @@ const getChatOrder = async (req, res) => {
         const { orderId } = req.params;
 
         // Find the order by orderId
-        const order = await ChatOrder.findOne({_id: orderId }).populate('customer').populate('vendor');
+        const order = await ChatOrder.findOne({ _id: orderId }).populate('customer').populate('vendor');
         if (!order) {
             return res.status(404).json({ message: 'Order not found' });
         }
@@ -157,7 +179,26 @@ const updateChatOrderStatus = async (req, res) => {
             { new: true }
         );
 
-        console.log("order-->>", order)
+        // Extract customer ID from the order
+        const customerId = order.customer._id;
+
+        // Retrieve the customer from database to get FCM token
+        const customer = await Customer.findById(customerId);
+        if (!customer) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+
+        const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
+
+        const title = 'Chat Order Status Updated';
+        const body = `The status of your chat order: ${order.orderMessage}, has been updated to ${newStatus}.`;
+        try {
+            // Assuming you have a function or service to send push notifications
+            let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+            console.log("Push notification response:", pushNotificationRes);
+        } catch (error) {
+            console.error('Error sending push notification:', error);
+        }
 
         if (!order) {
             return res.status(404).json({ error: 'Order not found or admin vendor not assigned to order' });
@@ -231,7 +272,7 @@ const getChatOrdersByVendor = async (req, res) => {
                         totalAmount: "$totalAmount",
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
-                        products:"$products",
+                        products: "$products",
                         createdAt: "$createdAt",
                         is_new: "$is_new"
                     }
@@ -248,7 +289,7 @@ const getChatOrdersByVendor = async (req, res) => {
                     shippingAddress: "$_id.shippingAddress",
                     isPaymentVerified: "$_id.isPaymentVerified",
                     paymentStatus: "$_id.paymentStatus",
-                    products:"$_id.products",
+                    products: "$_id.products",
                     createdAt: "$_id.createdAt",
                     is_new: "$_id.is_new",
                     orderMessage: "$_id.orderMessage",
@@ -308,7 +349,7 @@ const updateOrderAmountAndStatus = async (req, res) => {
             { new: true }
         );
 
-       
+
 
 
         if (!updatedOrder) {
