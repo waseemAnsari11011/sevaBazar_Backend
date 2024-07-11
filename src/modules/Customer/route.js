@@ -43,5 +43,7 @@ router.post('/check-restricted', customerController.checkIfUserIsRestricted);
 
 // Route to update a customer by ID
 router.put('/single-customer/:id',handleUpload(uploadDir), customerController.updateCustomer);
+router.put('/update-fcm/:id', customerController.updateFcm);
+
 
 module.exports = router;

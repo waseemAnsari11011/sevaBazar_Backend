@@ -560,24 +560,33 @@ exports.updateOrderStatus = async (req, res) => {
             { _id: new mongoose.Types.ObjectId(orderId), 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) },
             { $set: { 'vendors.$.orderStatus': newStatus } },
             { new: true }
-        );
+        ).populate('customer'); // Ensure customer details are populated
 
         if (!order) {
             return res.status(404).json({ error: 'Order or vendor not found' });
         }
 
-        // Assuming you have a method to get the device token of the vendor
-        // const vendor = order.vendors.find(v => v.vendor.toString() === vendorId);
-        if (true) {
-            const token = 'cAedDln3QPeJ6FVgzXtaFF:APA91bHVgCgNDSYg-j-PiOQ14UZ7863bljKzY0bzMgKUotImYGNseM8qnvUHfgjgfzfmcQlsql1L0y0Uh-r86ctXyBGFUVYm1NYgy0SUtevWB5S9KpM1mGXmSBFm5_vRS9QKHFTi_tNO'
-            const title = 'Order Status Updated';
-            const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
-            try {
-               let res = await sendPushNotification(token, title, body);
-               console.log("push-->", res)
-            } catch (error) {
-                console.error('Error sending push notification:', error);
-            }
+        // Extract customer ID from the order
+        const customerId = order.customer._id;
+
+        // Retrieve the customer from database to get FCM token
+        const customer = await Customer.findById(customerId);
+        if (!customer) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+
+        const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
+
+        console.log(fcmtoken)
+
+        const title = 'Order Status Updated';
+        const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
+        try {
+            // Assuming you have a function or service to send push notifications
+            let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+            console.log("Push notification response:", pushNotificationRes);
+        } catch (error) {
+            console.error('Error sending push notification:', error);
         }
 
         res.json(order);

@@ -173,6 +173,40 @@ exports.updateCustomer = async (req, res) => {
   }
 };
 
+exports.updateFcm = async (req, res) => {
+  console.log("it is called!!")
+  try {
+    // Extract customer ID from route parameters
+    const customerId = req.params.id;
+
+    console.log("customerId--->>", customerId)
+
+    // Extract new customer details from request body
+    const updatedData = req.body;
+
+    console.log("updatedData-->>", updatedData)
+
+    // Find the customer by ID and update their details
+    const updatedCustomer = await Customer.findByIdAndUpdate(
+      customerId,
+      updatedData,
+      { new: true, runValidators: true }
+    );
+
+    // Check if customer was found and updated
+    if (!updatedCustomer) {
+      return res.status(404).json({ message: 'Customer not found' });
+    }
+
+    // Respond with the updated customer details
+    res.status(200).json(updatedCustomer);
+  } catch (error) {
+    // Handle errors and send error response
+    console.error('Error updating customer:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 
 // Controller function to delete a customer by ID
 exports.deleteCustomer = async (req, res) => {
