@@ -10,7 +10,7 @@ exports.addProduct = async (req, res) => {
         const images = req.files.filter(file => file.fieldname.startsWith('productImage')).map(file => file.path);
         const variationImages = req.files.filter(file => file.fieldname.startsWith('variationImage'));
 
-       
+
         const variations = JSON.parse(req.body.variations);
 
         if (!variations || variations.length === 0) {
@@ -38,10 +38,10 @@ exports.addProduct = async (req, res) => {
         const formattedVariations = variations.map((variation, index) => {
             const formattedVariation = {
                 attributes: variation.attributes,
-                price: variation.price?parseInt(variation.price):0,  // Convert price to integer
-                discount: variation.discount? parseInt(variation.discount):0,  // Convert discount to integer
-                quantity: variation.quantity? parseInt(variation.quantity):0,  // Convert quantity to integer
-                images: variationImages.filter(file => file.fieldname.includes(`variationImage_${index}`)).map(file => file.path) ,  // Assign the corresponding images
+                price: variation.price ? parseInt(variation.price) : 0,  // Convert price to integer
+                discount: variation.discount ? parseInt(variation.discount) : 0,  // Convert discount to integer
+                quantity: variation.quantity ? parseInt(variation.quantity) : 0,  // Convert quantity to integer
+                images: variationImages.filter(file => file.fieldname.includes(`variationImage_${index}`)).map(file => file.path),  // Assign the corresponding images
                 parentVariation: null,  // Initialize parentVariation as null,
             };
 
@@ -167,9 +167,9 @@ exports.updateProduct = async (req, res) => {
 
             return {
                 attributes: variation.attributes,
-                price: variation.price ? parseInt(variation.price):0,
-                discount: variation.discount? parseInt(variation.discount):0,
-                quantity: variation.quantity?parseInt(variation.quantity):0,
+                price: variation.price ? parseInt(variation.price) : 0,
+                discount: variation.discount ? parseInt(variation.discount) : 0,
+                quantity: variation.quantity ? parseInt(variation.quantity) : 0,
                 parentVariation: parentVariationId ? new mongoose.Types.ObjectId(parentVariationId) : null,
                 _id: variation._id ? new mongoose.Types.ObjectId(variation._id) : new mongoose.Types.ObjectId(),
                 images: []
@@ -208,14 +208,14 @@ exports.updateProduct = async (req, res) => {
 
         // Update the product details
         product.name = name || product.name;
-        product.price = price? parseInt(price) || formattedVariations[0].price : 0
+        product.price = price ? parseInt(price) || formattedVariations[0].price : 0
         product.discount = parseInt(discount) || formattedVariations[0].discount;
         product.description = description || product.description;
         product.category = category || product.category;
         product.vendor = vendor || product.vendor;
         product.availableLocalities = availableLocalities || product.availableLocalities;
-        product.tags = tags? tags :[],
-        product.isReturnAllowed = isReturnAllowed || product.isReturnAllowed;
+        product.tags = tags ? tags : [],
+            product.isReturnAllowed = isReturnAllowed || product.isReturnAllowed;
         product.quantity = totalQuantity;
 
         console.log("req.files-->>", req.files)
@@ -361,7 +361,7 @@ exports.getProductsLowQuantity = async (req, res) => {
 
 // Controller function to get a product by ID
 exports.getProductById = async (req, res) => {
-    console.log("getProductById->>", req.params.id)
+    // console.log("getProductById->>", req.params.id)
 
     try {
         const { id } = req.params;
@@ -435,6 +435,14 @@ exports.deleteProduct = async (req, res) => {
     }
 };
 
+// Shuffle the products array
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
 
 // Controller function to get products by Category ID with pagination
 exports.getProductsByCategoryId = async (req, res) => {
@@ -454,13 +462,18 @@ exports.getProductsByCategoryId = async (req, res) => {
         // Perform the aggregation query
         const products = await Product.aggregate([
             { $match: matchCriteria },
-            { $sample: { size: limit } }, // Randomly sample 'limit' number of documents
             { $skip: (page - 1) * limit }, // Skip documents for pagination
             { $limit: limit } // Limit the number of documents returned
         ]);
 
+
+
+        shuffle(products);
+
         // Count the total number of products in the category with the specified location filter
         const totalProducts = await Product.countDocuments(matchCriteria);
+
+        console.log("totalProducts page", products.length, page)
 
         // Send the products in the response with pagination metadata
         res.status(200).json({
@@ -568,7 +581,6 @@ exports.getDiscountedProducts = async (req, res) => {
             ...locationFilter
         };
 
-        console.log("query-->>", query)
 
         // Find products that have a discount greater than 0 and match the location filter
         const discountedProducts = await Product.find(query)
