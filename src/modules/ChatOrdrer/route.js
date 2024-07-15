@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const {getChatOrder, updateChatOrder, markChatOrderViewed, getNewChatOrdersCountByVendor, updateChatPaymentStatusManually, createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus } = require('./controller'); // Adjust the path as necessary
+const {getChatOrder, updateChatOrder, markChatOrderViewed, getNewChatOrdersCountByVendor, updateChatPaymentStatusManually, createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, getChatOrdersHistoryByCustomer } = require('./controller'); // Adjust the path as necessary
 
 // POST route to create a new ChatOrder
 router.post('/create-chat-order', createChatOrder);
@@ -14,6 +14,7 @@ router.get('/chat-order/:orderId', getChatOrder);
 
 // GET route to fetch all ChatOrders of a particular customer
 router.get('/customer/:customerId/chat-orders', getChatOrdersByCustomer);
+router.get('/chat-orders-history/:customerId/', getChatOrdersHistoryByCustomer);
 
 
 router.put('/chat-order/status/:orderId/vendor/', updateChatOrderStatus);

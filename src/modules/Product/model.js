@@ -89,6 +89,9 @@ const productSchema = new mongoose.Schema({
         type: String,
         required: true
     }],
+   arrivalDuration:{
+    type: String,
+   }
 }, {
     timestamps: true
 });
@@ -97,6 +100,23 @@ const productSchema = new mongoose.Schema({
 function arrayLimit(val) {
     return val.length <= 10;
 }
+
+productSchema.pre('validate', async function (next) {
+    const product = this;
+
+    const containsNumber = product.availableLocalities.some(loc => /\d/.test(loc));
+    const containsAll = product.availableLocalities.includes('all');
+
+    if (containsAll && !containsNumber) {
+        product.arrivalDuration = '4 Days'
+    } else if (containsNumber) {
+        product.arrivalDuration = '90 Min'
+    }
+
+    next();
+});
+
+
 
 // Create the Product Model
 const Product = mongoose.model('Product', productSchema);

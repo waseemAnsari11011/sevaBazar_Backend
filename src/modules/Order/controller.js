@@ -372,7 +372,7 @@ exports.getOrdersByVendor = async (req, res) => {
                 $group: {
                     _id: {
                         orderId: "$_id",
-                        shortId:"$orderId",
+                        shortId: "$orderId",
                         customer: "$customerDetails",
                         shippingAddress: "$shippingAddress",
                         vendor: "$vendorDetails",
@@ -401,7 +401,7 @@ exports.getOrdersByVendor = async (req, res) => {
                 $project: {
                     _id: 0,
                     orderId: "$_id.orderId",
-                    shortId:"$_id.shortId",
+                    shortId: "$_id.shortId",
                     customer: "$_id.customer",
                     shippingAddress: "$_id.shippingAddress",
                     isPaymentVerified: "$_id.isPaymentVerified",
@@ -682,7 +682,10 @@ exports.getOrdersByCustomerAndStatus = async (req, res) => {
 exports.getOrdersByCustomerId = async (req, res) => {
     try {
         const customerId = req.params.customerId;
-        const orders = await Order.find({ customer: customerId })
+        const orders = await Order.find({
+            customer: customerId,
+            'vendors.orderStatus': { $nin: ['Delivered', 'Cancelled'] }
+        })
             .populate('customer')
             .populate('vendors.vendor')
             .populate('vendors.products.product')
@@ -694,6 +697,27 @@ exports.getOrdersByCustomerId = async (req, res) => {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
+
+exports.getOrdersHistoryByCustomerId = async (req, res) => {
+    try {
+        const customerId = req.params.customerId;
+        const orders = await Order.find({
+            customer: customerId,
+            'vendors.orderStatus': { $in: ['Delivered', 'Cancelled'] }
+        })
+            .populate('customer')
+            .populate('vendors.vendor')
+            .populate('vendors.products.product')
+            .sort({ createdAt: -1 }) // Sort by createdAt in descending order (latest to oldest)
+            .exec();
+
+        res.status(200).json(orders);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+
 
 exports.markOrderViewed = async (req, res) => {
     console.log("markOrderViewed is called")
