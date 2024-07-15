@@ -146,9 +146,38 @@ const getChatOrdersByCustomer = async (req, res) => {
         }
 
         // Find all chat orders for the specified customer, sorted by createdAt in descending order
-        const chatOrders = await ChatOrder.find({ customer: customerId })
-            .populate('customer')
-            .sort({ createdAt: -1 });
+        const chatOrders = await ChatOrder.find({
+            customer: customerId,
+            orderStatus: { $nin: ['Delivered', 'Cancelled'] }
+        })
+        .populate('customer')
+        .sort({ createdAt: -1 });
+
+        return res.status(200).json(chatOrders);
+    } catch (error) {
+        console.error('Error fetching chat orders:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+const getChatOrdersHistoryByCustomer = async (req, res) => {
+    try {
+        const customerId = req.params.customerId;
+
+        // Verify that the customer exists
+        const customerExists = await Customer.findById(customerId);
+        if (!customerExists) {
+            return res.status(404).json({ message: 'Customer not found' });
+        }
+
+        // Find all chat orders for the specified customer, sorted by createdAt in descending order
+        const chatOrders = await ChatOrder.find({
+            customer: customerId,
+            orderStatus: { $in: ['Delivered', 'Cancelled'] }
+        })
+        .populate('customer')
+        .sort({ createdAt: -1 });
+        
 
         return res.status(200).json(chatOrders);
     } catch (error) {
@@ -450,4 +479,4 @@ const markChatOrderViewed = async (req, res) => {
         res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
     }
 };
-module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually, getNewChatOrdersCountByVendor, markChatOrderViewed, updateChatOrder, getChatOrder };
+module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually, getNewChatOrdersCountByVendor, markChatOrderViewed, updateChatOrder, getChatOrder , getChatOrdersHistoryByCustomer};
