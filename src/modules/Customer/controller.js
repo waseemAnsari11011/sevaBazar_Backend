@@ -79,6 +79,8 @@ exports.customerLogin = async (req, res) => {
 };
 
 exports.customerLoginPhone = async (req, res) => {
+
+  console.log("customerLoginPhone-->>", customerLoginPhone)
   const { phoneNumber, uid } = req.body;
 
   try {
