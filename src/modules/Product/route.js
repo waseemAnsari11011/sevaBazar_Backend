@@ -18,6 +18,7 @@ router.get('/products/:id/similar', productController.getSimilarProducts);
 router.get('/recentlyAddedProducts', productController.getRecentlyAddedProducts);
 router.get('/onDiscountProducts', productController.getDiscountedProducts);
 router.get('/searchProducts', productController.fuzzySearchProducts);
+router.put('/update-arrival-duration', productController.updateArrivalDuration);
 
 router.put('/products/:productId/variations/:variationId', productController.updateVariationQuantity);
 

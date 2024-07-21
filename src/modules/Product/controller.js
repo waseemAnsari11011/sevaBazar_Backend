@@ -280,8 +280,8 @@ exports.getAllProductsVendor = async (req, res) => {
 
         // Find all products, populate the category field, and sort by creation date (latest to oldest)
         const products = await Product.find({ vendor: vendorId })
-                                      .populate('category')
-                                      .sort({ createdAt: -1 });
+            .populate('category')
+            .sort({ createdAt: -1 });
 
         // Send response with the products
         res.status(200).json({
@@ -645,6 +645,41 @@ exports.fuzzySearchProducts = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+
+exports.updateArrivalDuration = async (req, res) => {
+    try {
+        // Fetch all products that do not have the arrivalDuration field set
+        const products = await Product.find({
+            $or: [
+                { arrivalDuration: { $exists: false } },
+                { arrivalDuration: null }
+            ]
+        });
+
+        // Update each product based on the custom pre-validate logic
+        const updatePromises = products.map(async (product) => {
+            const containsNumber = product.availableLocalities.some(loc => /\d/.test(loc));
+            const containsAll = product.availableLocalities.includes('all');
+
+            if (containsAll && !containsNumber) {
+                product.arrivalDuration = '4 Days';
+            } else if (containsNumber) {
+                product.arrivalDuration = '90 Min';
+            }
+
+            return product.save();
+        });
+
+        // Wait for all updates to complete
+        await Promise.all(updatePromises);
+
+        res.status(200).json({ message: 'Arrival duration updated for all applicable products.' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'An error occurred while updating arrival duration.' });
+    }
+}
 
 
 
