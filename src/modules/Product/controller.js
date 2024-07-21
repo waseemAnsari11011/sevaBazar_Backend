@@ -278,8 +278,10 @@ exports.getAllProductsVendor = async (req, res) => {
     try {
         const vendorId = req.params.vendorId;
 
-        // Find all products and populate the category field
-        const products = await Product.find({ vendor: vendorId }).populate('category');
+        // Find all products, populate the category field, and sort by creation date (latest to oldest)
+        const products = await Product.find({ vendor: vendorId })
+                                      .populate('category')
+                                      .sort({ createdAt: -1 });
 
         // Send response with the products
         res.status(200).json({
@@ -294,6 +296,7 @@ exports.getAllProductsVendor = async (req, res) => {
         });
     }
 };
+
 
 exports.getAllProducts = async (req, res) => {
     try {
