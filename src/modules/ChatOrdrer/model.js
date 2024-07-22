@@ -83,6 +83,9 @@ const orderSchema = new Schema({
     totalAmount: {
         type: Number,
     },
+    arrivalAt: {
+        type: Date,
+    },
     vendor: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Vendor',
@@ -123,6 +126,8 @@ orderSchema.pre('validate', async function (next) {
         // Set the vendor to admin
         this.vendor = adminVendor._id;
     }
+
+    this.arrivalAt = new Date(Date.now() + 90 * 60 * 1000);
 
     next();
 });
