@@ -19,7 +19,8 @@ router.get('/recentlyAddedProducts', productController.getRecentlyAddedProducts)
 router.get('/onDiscountProducts', productController.getDiscountedProducts);
 router.get('/searchProducts', productController.fuzzySearchProducts);
 router.put('/update-arrival-duration', productController.updateArrivalDuration);
-
 router.put('/products/:productId/variations/:variationId', productController.updateVariationQuantity);
+router.patch('/products/:id/toggle-visibility', productController.toggleVisibility);
+router.patch('/products/add-is-visible-field', productController.addIsVisibleField);
 
 module.exports = router;
