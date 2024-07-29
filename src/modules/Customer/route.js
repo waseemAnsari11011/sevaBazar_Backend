@@ -29,6 +29,10 @@ router.delete('/customers/:id', customerController.deleteCustomer);
 
 //save address
 router.post('/address/:id', customerController.saveAddressAndLocalities);
+router.get('/address/:id', customerController.getShippingAddresses);
+router.put('/address/:id/:addressId', customerController.updateShippingAddress);
+router.delete('/address/:id/:addressId', customerController.deleteShippingAddress);
+router.put('/customer/:userId/address/:addressId/activate', customerController.setActiveAddress);
 
 // Route to get all customers
 router.get('/customers', authenticateToken, authorizeAdmin, customerController.getAllCustomers);
