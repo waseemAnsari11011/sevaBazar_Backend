@@ -403,6 +403,31 @@ exports.setActiveAddress = async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
+exports.updateCustomerDocuments = async (req, res) => {
+  try {
+    const customers = await Customer.find({}); // Fetch all customer documents
+
+    for (const customer of customers) {
+      if (customer.shippingAddresses && !Array.isArray(customer.shippingAddresses)) {
+        // Convert shippingAddresses to an array if it's an object
+        customer.shippingAddresses = [customer.shippingAddresses];
+      }
+      
+      // Ensure availableLocalities is updated as necessary, since the schema change might require different handling
+      // if (typeof customer.availableLocalities === 'string') {
+      //   customer.availableLocalities = customer.availableLocalities.split(','); // Example conversion, modify as needed
+      // }
+
+      // Save the updated document
+      await customer.save();
+    }
+
+    res.status(200).json({ message: 'Customer documents updated successfully' });
+  } catch (error) {
+    console.error('Error updating customer documents:', error);
+    res.status(500).json({ message: 'Error updating customer documents', error });
+  }
+};
 
 
 
