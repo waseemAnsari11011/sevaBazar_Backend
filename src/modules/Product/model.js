@@ -50,6 +50,10 @@ const productSchema = new mongoose.Schema({
         type: Boolean,
         required: true
     },
+    isVisible: {
+        type: Boolean,
+        required: true
+    },
     images: {
         type: [String],
         validate: [arrayLimit, '{PATH} exceeds the limit of 10']

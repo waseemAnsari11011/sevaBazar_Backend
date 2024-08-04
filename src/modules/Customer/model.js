@@ -16,24 +16,35 @@ const customerSchema = new Schema({
     type: String,
     required: true
   },
-  shippingAddresses: {
-    address: {
-      type: String,
-    },
-    city: {
-      type: String,
-    },
-    state: {
-      type: String,
-    },
-    country: {
-      type: String,
-    },
-    postalCode: {
-      type: String,
+  shippingAddresses: [
+    {
+      name: {
+        type: String,
+      },
+      phone: {
+        type: String,
+      },
+      address: {
+        type: String,
+      },
+      city: {
+        type: String,
+      },
+      state: {
+        type: String,
+      },
+      country: {
+        type: String,
+      },
+      postalCode: {
+        type: String,
+      },
+      isActive: {
+        type: Boolean,
+        default: false
+      }
     }
-  }
-  ,
+  ],
   availableLocalities: {
     type: String,
   },
@@ -57,6 +68,7 @@ const customerSchema = new Schema({
     default: Date.now
   }
 });
+
 
 
 // Method to compare passwords

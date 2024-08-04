@@ -200,6 +200,8 @@ exports.createOrder = async (req, res) => {
     try {
         const { customer, vendors, shippingAddress } = req.body;
 
+        console.log("shippingAddress==>>>>", shippingAddress)
+
         // Validate required fields
         if (!customer || !vendors || !shippingAddress) {
             return res.status(400).json({ error: 'All required fields must be provided' });

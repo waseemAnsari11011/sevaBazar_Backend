@@ -459,7 +459,8 @@ exports.getProductsByCategoryId = async (req, res) => {
         const matchCriteria = {
             category: new mongoose.Types.ObjectId(categoryId),
             availableLocalities: { $in: [userLocation, 'all'] },
-            quantity: { $gt: 0 } // Ensure quantity is greater than 0
+            quantity: { $gt: 0 }, // Ensure quantity is greater than 0
+            isVisible: true
         };
 
         // Perform the aggregation query
@@ -514,6 +515,7 @@ exports.getSimilarProducts = async (req, res) => {
             category: product.category,
             availableLocalities: { $in: [userLocation, 'all'] },
             quantity: { $gt: 0 },
+            isVisible: true,
             _id: { $ne: productId }
         })
             .skip((page - 1) * limit)
@@ -546,7 +548,7 @@ exports.getRecentlyAddedProducts = async (req, res) => {
         const userLocation = req.query.userLocation;
 
         // Construct the filter for availableLocalities
-        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } } : { quantity: { $gt: 0 } };
+        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } , isVisible: true} : { quantity: { $gt: 0 } , isVisible: true};
 
         // Find the most recently added products with the location filter
         const recentlyAddedProducts = await Product.find(locationFilter)
@@ -576,7 +578,7 @@ exports.getDiscountedProducts = async (req, res) => {
         const userLocation = req.query.userLocation;
 
         // Construct the filter for availableLocalities
-        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } } : { quantity: { $gt: 0 } };
+        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } , isVisible: true} : { quantity: { $gt: 0 } , isVisible: true};
 
         // Combine the discount filter with the location filter
         const query = {
@@ -616,7 +618,7 @@ exports.fuzzySearchProducts = async (req, res) => {
         const regexQuery = new RegExp(searchQuery, 'i'); // 'i' for case-insensitive
 
         // Construct the filter for availableLocalities
-        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } } : { quantity: { $gt: 0 } };
+        const locationFilter = userLocation ? { availableLocalities: { $in: [userLocation, 'all'] }, quantity: { $gt: 0 } , isVisible: true} : { quantity: { $gt: 0 } , isVisible: true};
 
         // Combine the search query with the location filter
         const query = {
@@ -754,6 +756,53 @@ exports.updateVariationQuantity = async (req, res) => {
         });
     }
 };
+
+exports.toggleVisibility = async (req, res) => {
+    try {
+        const productId = req.params.id; // Get the product ID from the request parameters
+
+        // Find the product by its ID
+        const product = await Product.findById(productId);
+
+        if (!product) {
+            return res.status(404).json({ message: 'Product not found' });
+        }
+
+        // Toggle the 'isVisible' field
+        product.isVisible = !product.isVisible;
+
+        // Save the updated product
+        await product.save();
+
+        res.status(200).json({
+            message: 'Product visibility toggled successfully',
+            product
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+exports.addIsVisibleField = async (req, res) => {
+    console.log("addIsVisibleField--->>>")
+    try {
+        // Update all products to add the 'isVisible' field with a default value (e.g., true)
+        const result = await Product.updateMany(
+            { isVisible: { $exists: false } }, // Only update documents that don't have 'isVisible'
+            { $set: { isVisible: true } } // Set 'isVisible' to true
+        );
+
+        res.status(200).json({
+            message: 'Successfully added the `isVisible` field to all products.',
+            modifiedCount: result.modifiedCount
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 
 
 

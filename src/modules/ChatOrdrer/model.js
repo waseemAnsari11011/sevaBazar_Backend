@@ -40,28 +40,7 @@ const orderSchema = new Schema({
         required: true,
     },
     name: { type: String },
-    shippingAddress: {
-        address: {
-            type: String,
-            required: true
-        },
-        city: {
-            type: String,
-            required: true
-        },
-        state: {
-            type: String,
-            required: true
-        },
-        country: {
-            type: String,
-            required: true
-        },
-        postalCode: {
-            type: String,
-            required: true
-        }
-    },
+    shippingAddress: {type: mongoose.Schema.Types.Mixed},
     paymentStatus: {
         type: String,
         enum: ['Paid', 'Unpaid'],

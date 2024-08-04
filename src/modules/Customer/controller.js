@@ -243,29 +243,28 @@ exports.sendOtp = async (req, res) => {
 
 // Controller function to save address and available localities for a user
 exports.saveAddressAndLocalities = async (req, res) => {
-
   try {
-    const { addressLine1, city, state, country, postalCode, availableLocalities } = req.body;
+    const { addressLine1, city, state, country, postalCode, availableLocalities, name, phone } = req.body;
     const { id } = req.params; // Assuming userId is passed in the URL params or request body
-
 
     // Find the user by userId
     const user = await Customer.findById(id);
-
-    console.log("user-->>", user)
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Add the new address to user's shippingAddresses array
-    user.shippingAddresses = {
+    const newAddress = {
+      name,
+      phone,
       address: addressLine1,
       city,
       state,
       country,
       postalCode
-    }
+    };
+    user.shippingAddresses.push(newAddress);
 
     // Update user's availableLocalities
     user.availableLocalities = availableLocalities;
@@ -279,6 +278,132 @@ exports.saveAddressAndLocalities = async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
+exports.updateShippingAddress = async (req, res) => {
+  try {
+    const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
+    const { addressLine1, city, state, country, postalCode, name, phone } = req.body;
+
+    // Find the user by userId
+    const user = await Customer.findById(id);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Find the address by addressId
+    const addressIndex = user.shippingAddresses.findIndex(address => address._id.toString() === addressId);
+
+    if (addressIndex === -1) {
+      return res.status(404).json({ error: 'Address not found' });
+    }
+
+    // Update the address fields
+    user.shippingAddresses[addressIndex] = {
+      ...user.shippingAddresses[addressIndex],
+      name,
+      phone,
+      address: addressLine1,
+      city,
+      state,
+      country,
+      postalCode
+    };
+
+    // Save the updated user
+    await user.save();
+
+    return res.status(200).json({ message: 'Shipping address updated successfully', user });
+  } catch (error) {
+    console.error('Error updating shipping address:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+exports.deleteShippingAddress = async (req, res) => {
+  try {
+    const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
+
+    // Find the user by userId
+    const user = await Customer.findById(id);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Find the address by addressId and remove it
+    const addressIndex = user.shippingAddresses.findIndex(address => address._id.toString() === addressId);
+
+    if (addressIndex === -1) {
+      return res.status(404).json({ error: 'Address not found' });
+    }
+
+    // Remove the address from the array
+    user.shippingAddresses.splice(addressIndex, 1);
+
+    // Save the updated user
+    await user.save();
+
+    return res.status(200).json({ message: 'Shipping address deleted successfully', user });
+  } catch (error) {
+    console.error('Error deleting shipping address:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+exports.getShippingAddresses = async (req, res) => {
+  try {
+    const { id } = req.params; // Assuming userId is passed in the URL params
+
+    // Find the user by userId
+    const user = await Customer.findById(id);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Retrieve the shipping addresses
+    const shippingAddresses = user.shippingAddresses;
+
+    return res.status(200).json({ shippingAddresses });
+  } catch (error) {
+    console.error('Error fetching shipping addresses:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+exports.setActiveAddress = async (req, res) => {
+  try {
+    const { userId, addressId } = req.params;
+
+    // Find the customer by userId
+    const user = await Customer.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if the addressId exists in the user's shippingAddresses
+    const address = user.shippingAddresses.id(addressId);
+
+    if (!address) {
+      return res.status(404).json({ error: 'Address not found' });
+    }
+
+    // Set all addresses to inactive
+    user.shippingAddresses.forEach(addr => {
+      addr.isActive = false;
+    });
+
+    // Set the specific address to active
+    address.isActive = true;
+
+    // Save the updated user
+    await user.save();
+
+    return res.status(200).json({ message: 'Address set as active successfully',user });
+  } catch (error) {
+    console.error('Error setting active address:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 
 
 // Controller to fetch all customer with role 'customer'
