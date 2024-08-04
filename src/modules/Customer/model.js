@@ -80,3 +80,4 @@ customerSchema.methods.comparePassword = async function (candidatePassword) {
 const Customer = mongoose.model('Customer', customerSchema);
 
 module.exports = Customer;
+//
