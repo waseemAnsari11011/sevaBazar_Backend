@@ -52,6 +52,7 @@ const productSchema = new mongoose.Schema({
     },
     isVisible: {
         type: Boolean,
+        default: true,
         required: true
     },
     images: {
