@@ -254,17 +254,33 @@ exports.saveAddressAndLocalities = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Add the new address to user's shippingAddresses array
-    const newAddress = {
-      name,
-      phone,
-      address: addressLine1,
-      city,
-      state,
-      country,
-      postalCode
-    };
-    user.shippingAddresses.push(newAddress);
+    // Check if shippingAddresses array is empty
+    if (user.shippingAddresses.length === 0) {
+      // If empty, set isActive to true for the new address
+      const newAddress = {
+        name,
+        phone,
+        address: addressLine1,
+        city,
+        state,
+        country,
+        postalCode,
+        isActive: true // Set isActive to true for the first address
+      };
+      user.shippingAddresses.push(newAddress);
+    } else {
+      // If not empty, add the new address with isActive false
+      const newAddress = {
+        name,
+        phone,
+        address: addressLine1,
+        city,
+        state,
+        country,
+        postalCode
+      };
+      user.shippingAddresses.push(newAddress);
+    }
 
     // Update user's availableLocalities
     user.availableLocalities = availableLocalities;
@@ -281,7 +297,9 @@ exports.saveAddressAndLocalities = async (req, res) => {
 exports.updateShippingAddress = async (req, res) => {
   try {
     const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
-    const { addressLine1, city, state, country, postalCode, name, phone } = req.body;
+    const { addressLine1, city, state, country, postalCode, name, phone, isActive } = req.body;
+
+    console.log("isActive-->>", isActive)
 
     // Find the user by userId
     const user = await Customer.findById(id);
@@ -306,7 +324,8 @@ exports.updateShippingAddress = async (req, res) => {
       city,
       state,
       country,
-      postalCode
+      postalCode,
+      isActive
     };
 
     // Save the updated user
