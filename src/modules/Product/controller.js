@@ -117,8 +117,16 @@ exports.updateProduct = async (req, res) => {
 
         console.log("tags-->>", tags)
 
+        console.log("_id--->>>", id)
+
+        const _id = new mongoose.Types.ObjectId(id)
+
+        console.log("mongoos_id--->>>", _id)
+
         // Find the product by ID
-        const product = await Product.findById(id);
+        const product = await Product.findById(_id);
+
+        console.log("product__founded!!--->>>", product)
 
         if (!product) {
             return res.status(404).json({
