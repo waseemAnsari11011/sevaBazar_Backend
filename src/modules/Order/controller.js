@@ -554,8 +554,6 @@ exports.updateOrderStatus = async (req, res) => {
     const { orderId, vendorId } = req.params;
     const { newStatus } = req.body;
 
-    console.log(orderId, vendorId, newStatus);
-
     try {
         // Find the order by ID and update the status for the specific vendor
         const order = await Order.findOneAndUpdate(
@@ -568,6 +566,24 @@ exports.updateOrderStatus = async (req, res) => {
             return res.status(404).json({ error: 'Order or vendor not found' });
         }
 
+        // If the new status is 'Delivered', calculate and update deliveredInMin at the vendor level
+        if (newStatus === 'Delivered') {
+            const currentTime = new Date();
+            const createdAt = order.createdAt;
+            const deliveredInMin = Math.floor((currentTime - createdAt) / 60000); // Difference in minutes
+            console.log("deliveredInMin-->", deliveredInMin)
+
+            // Update the deliveredInMin field for the specific vendor
+            order.vendors.forEach(vendor => {
+                if (vendor.vendor.equals(vendorId)) {
+                    vendor.deliveredInMin = deliveredInMin;
+                }
+            });
+
+            // Save the updated order
+            await order.save();
+        }
+
         // Extract customer ID from the order
         const customerId = order.customer._id;
 
@@ -578,8 +594,6 @@ exports.updateOrderStatus = async (req, res) => {
         }
 
         const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
-
-        console.log(fcmtoken)
 
         const title = 'Order Status Updated';
         const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
@@ -597,6 +611,10 @@ exports.updateOrderStatus = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
+
+
+
+
 
 
 

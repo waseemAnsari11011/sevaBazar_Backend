@@ -244,7 +244,7 @@ exports.sendOtp = async (req, res) => {
 // Controller function to save address and available localities for a user
 exports.saveAddressAndLocalities = async (req, res) => {
   try {
-    const { addressLine1, city, state, country, postalCode, availableLocalities, name, phone } = req.body;
+    const { addressLine1,landmark, city, state, country, postalCode, availableLocalities, name, phone } = req.body;
     const { id } = req.params; // Assuming userId is passed in the URL params or request body
 
     // Find the user by userId
@@ -261,6 +261,7 @@ exports.saveAddressAndLocalities = async (req, res) => {
         name,
         phone,
         address: addressLine1,
+        landmark,
         city,
         state,
         country,
@@ -274,6 +275,7 @@ exports.saveAddressAndLocalities = async (req, res) => {
         name,
         phone,
         address: addressLine1,
+        landmark,
         city,
         state,
         country,
@@ -297,9 +299,9 @@ exports.saveAddressAndLocalities = async (req, res) => {
 exports.updateShippingAddress = async (req, res) => {
   try {
     const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
-    const { addressLine1, city, state, country, postalCode, name, phone, isActive } = req.body;
+    const { addressLine1,landmark, city, state, country, postalCode, name, phone, isActive } = req.body;
 
-    console.log("isActive-->>", isActive)
+    console.log("landmark-->>", landmark)
 
     // Find the user by userId
     const user = await Customer.findById(id);
@@ -321,6 +323,7 @@ exports.updateShippingAddress = async (req, res) => {
       name,
       phone,
       address: addressLine1,
+      landmark,
       city,
       state,
       country,

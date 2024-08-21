@@ -24,6 +24,9 @@ const customerSchema = new Schema({
       phone: {
         type: String,
       },
+      landmark: {
+        type: String,
+      },
       address: {
         type: String,
       },
