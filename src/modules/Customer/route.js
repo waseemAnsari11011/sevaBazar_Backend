@@ -32,6 +32,7 @@ router.post('/address/:id', customerController.saveAddressAndLocalities);
 router.get('/address/:id', customerController.getShippingAddresses);
 router.put('/address/:id/:addressId', customerController.updateShippingAddress);
 router.delete('/address/:id/:addressId', customerController.deleteShippingAddress);
+
 router.put('/customer/:userId/address/:addressId/activate', customerController.setActiveAddress);
 router.put('/update-customer-documents', customerController.updateCustomerDocuments);
 // Route to get all customers

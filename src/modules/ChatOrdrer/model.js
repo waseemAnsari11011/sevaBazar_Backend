@@ -46,6 +46,9 @@ const orderSchema = new Schema({
         enum: ['Paid', 'Unpaid'],
         default: 'Unpaid'
     },
+    deliveredInMin:{
+        type: Number,
+    },
     orderStatus: {
         type: String,
         enum: ['In Review', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],

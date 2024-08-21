@@ -191,7 +191,7 @@ const updateChatOrderStatus = async (req, res) => {
     const { orderId } = req.params;
     const { newStatus } = req.body;
 
-    console.log("orderId, newStatus==>>", orderId, newStatus)
+    console.log("orderId, newStatus==>>", orderId, newStatus);
 
     try {
         // Find the admin vendor
@@ -207,6 +207,22 @@ const updateChatOrderStatus = async (req, res) => {
             { $set: { orderStatus: newStatus } },
             { new: true }
         );
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found or admin vendor not assigned to order' });
+        }
+
+        // If the new status is 'Delivered', calculate and update deliveredInMin
+        if (newStatus === 'Delivered') {
+            const currentTime = new Date();
+            const createdAt = order.createdAt;
+            const deliveredInMin = Math.floor((currentTime - createdAt) / 60000); // Difference in minutes
+
+            order.deliveredInMin = deliveredInMin;
+
+            // Save the updated order
+            await order.save();
+        }
 
         // Extract customer ID from the order
         const customerId = order.customer._id;
@@ -229,16 +245,13 @@ const updateChatOrderStatus = async (req, res) => {
             console.error('Error sending push notification:', error);
         }
 
-        if (!order) {
-            return res.status(404).json({ error: 'Order not found or admin vendor not assigned to order' });
-        }
-
         res.json(order);
     } catch (error) {
         console.error('Error updating order status:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
+
 
 const getChatOrdersByVendor = async (req, res) => {
     try {
