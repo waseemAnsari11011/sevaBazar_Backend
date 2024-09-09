@@ -2,6 +2,7 @@ const Product = require('./model'); // Adjust the path as necessary
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
+const Category = require('../Category/model');
 
 // Controller function to add a new product
 exports.addProduct = async (req, res) => {
