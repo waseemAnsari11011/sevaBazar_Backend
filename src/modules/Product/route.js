@@ -22,5 +22,6 @@ router.put('/update-arrival-duration', productController.updateArrivalDuration);
 router.put('/products/:productId/variations/:variationId', productController.updateVariationQuantity);
 router.patch('/products/:id/toggle-visibility', productController.toggleVisibility);
 router.patch('/products/add-is-visible-field', productController.addIsVisibleField);
-
+//get all category products
+router.get('/allCategoryProducts', productController.getallCategoryProducts);
 module.exports = router;
