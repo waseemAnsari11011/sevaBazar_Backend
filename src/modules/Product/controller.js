@@ -2,6 +2,7 @@ const Product = require('./model'); // Adjust the path as necessary
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
+const Category = require('../Category/model');
 
 // Controller function to add a new product
 exports.addProduct = async (req, res) => {
@@ -808,6 +809,33 @@ exports.addIsVisibleField = async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server error' });
+    }
+};
+
+
+exports.getallCategoryProducts = async (req, res) => {
+    try {
+        // Fetch all categories
+        const categories = await Category.find();
+
+        // Prepare the result array
+        const result = await Promise.all(categories.map(async (category) => {
+            // Fetch a maximum of 4 products for each category
+            const products = await Product.find({ category: category._id }).limit(4);
+
+            // Return an object containing the category ID, name, and its products
+            return {
+                categoryId: category._id,
+                categoryName: category.name,
+                products: products
+            };
+        }));
+
+        // Send the result as the response
+        res.status(200).json(result);
+    } catch (error) {
+        console.error("Error fetching category products:", error);
+        res.status(500).json({ message: "Failed to fetch category products", error });
     }
 };
 
