@@ -13,10 +13,18 @@ const deliverySchema = new Schema({
     type: String,
     required: true
   },
+
   role: {
     type: String,
     default: 'delivery man'
   },
+  address: {
+    type: String,
+  },
+  vehicleDetails:{
+    type: String,
+  },
+
   fcmDeviceToken: {
     type: String,
   },
