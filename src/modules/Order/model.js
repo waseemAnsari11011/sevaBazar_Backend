@@ -90,6 +90,10 @@ const orderSchema = new Schema({
         type: Date,
         default: Date.now
     },
+    acceptedBy:{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Delivery',
+    },
     is_new: {
         type: Boolean,
         default: true
