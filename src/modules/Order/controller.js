@@ -758,8 +758,69 @@ exports.markOrderViewed = async (req, res) => {
 
 
 
+// Controller to get all unaccepted orders with populated customer details
+exports.getUnacceptedOrders = async (req, res) => {
+    try {
+        // Find all orders where acceptedBy is null or undefined
+        const unacceptedOrders = await Order.find({
+            acceptedBy: { $exists: false }
+        })
+        .select('orderId customer vendors shippingAddress createdAt')
+        .populate({
+            path: 'customer', 
+            select: 'name contactNumber image' // Select relevant customer details to return
+        });
+
+        // Send the found orders as a response
+        res.status(200).json({
+            success: true,
+            orders: unacceptedOrders
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Server Error',
+            error: error.message
+        });
+    }
+};
 
 
+exports.acceptOrder = async (req, res) => {
+    try {
+        const { orderId } = req.body; // Get the order ID from the request body
+        const { deliveryManId } = req.params; // Assuming deliveryManId is passed as a URL parameter
+
+        console.log("orderId==>>", orderId)
+
+        // Find the order by ID and update the acceptedBy field
+        const updatedOrder = await Order.findOneAndUpdate(
+            { orderId: orderId }, // Match order by orderId
+            { acceptedBy: deliveryManId, is_new: false }, // Update acceptedBy and is_new fields
+            { new: true } // Return the updated order
+        ).populate('customer', 'name contactNumber'); // Optionally populate customer details
+
+        if (!updatedOrder) {
+            return res.status(404).json({
+                success: false,
+                message: 'Order not found'
+            });
+        }
+
+        // Send back the updated order details
+        res.status(200).json({
+            success: true,
+            message: 'Order accepted successfully',
+            order: updatedOrder
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Server Error',
+            error: error.message
+        });
+    }
+};
 
 
 
