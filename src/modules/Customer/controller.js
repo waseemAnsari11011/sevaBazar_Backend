@@ -1,18 +1,19 @@
-const Customer = require('./model'); // Ensure the correct path to the customer model
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const sendOtp = require('../utils/sendOtp');
-require('dotenv').config();
+const Customer = require("./model"); // Ensure the correct path to the customer model
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const sendOtp = require("../utils/sendOtp");
+require("dotenv").config();
 const secret = process.env.JWT_SECRET;
 
 // Controller function to create a new customer
 exports.createCustomer = async (req, res) => {
   try {
-    console.log("req--->>>", req.body)
-    const { name, password, email, contactNumber, availableLocalities } = req.body;
+    console.log("req--->>>", req.body);
+    const { name, password, email, contactNumber, availableLocalities } =
+      req.body;
 
     if (!password || !email || !contactNumber || !availableLocalities) {
-      return res.status(400).send({ error: 'All fields are required' });
+      return res.status(400).send({ error: "All fields are required" });
     }
 
     // Hash the password
@@ -21,7 +22,7 @@ exports.createCustomer = async (req, res) => {
     // Check if the email already exists
     const existingCustomer = await Customer.findOne({ email });
     if (existingCustomer) {
-      return res.status(400).send({ error: 'Email already in use' });
+      return res.status(400).send({ error: "Email already in use" });
     }
 
     // Create a new customer with the hashed password
@@ -31,18 +32,18 @@ exports.createCustomer = async (req, res) => {
       email,
       contactNumber,
       availableLocalities,
-      role: "customer"
+      role: "customer",
     });
 
     await newCustomer.save();
     res.status(201).send(newCustomer);
   } catch (error) {
     console.error(error);
-    res.status(500).send({ error: 'An error occurred while creating the customer' });
+    res
+      .status(500)
+      .send({ error: "An error occurred while creating the customer" });
   }
 };
-
-
 
 exports.customerLogin = async (req, res) => {
   const { email, password } = req.body;
@@ -53,28 +54,30 @@ exports.customerLogin = async (req, res) => {
 
     // Check if customer exists
     if (!customer) {
-      return res.status(401).json({ message: 'Invalid email or password' });
+      return res.status(401).json({ message: "Invalid email or password" });
     }
 
     // Check if the customer is restricted
     if (customer.isRestricted) {
-      return res.status(403).json({ message: 'Your account is restricted. Please contact support.' });
+      return res.status(403).json({
+        message: "Your account is restricted. Please contact support.",
+      });
     }
 
     // Check if password matches
     const isPasswordMatch = await bcrypt.compare(password, customer.password);
     if (!isPasswordMatch) {
-      return res.status(401).json({ message: 'Invalid email or password' });
+      return res.status(401).json({ message: "Invalid email or password" });
     }
 
     // Generate a token
     const token = jwt.sign({ id: customer._id, role: customer.role }, secret);
 
     // Customer authenticated successfully
-    res.status(200).json({ message: 'Login successful', customer, token });
+    res.status(200).json({ message: "Login successful", customer, token });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -83,12 +86,14 @@ exports.customerLoginPhone = async (req, res) => {
 
   try {
     if (!phoneNumber || !uid) {
-      return res.status(400).send({ error: 'All fields are required' });
+      return res.status(400).send({ error: "All fields are required" });
     }
 
     let customer;
 
-    const existingCustomer = await Customer.findOne({ contactNumber: phoneNumber });
+    const existingCustomer = await Customer.findOne({
+      contactNumber: phoneNumber,
+    });
     customer = existingCustomer;
 
     if (!existingCustomer) {
@@ -105,16 +110,12 @@ exports.customerLoginPhone = async (req, res) => {
     // Generate a token
     const token = jwt.sign({ id: customer._id, role: customer.role }, secret);
 
-    res.status(200).json({ message: 'Login successful', customer, token });
-
+    res.status(200).json({ message: "Login successful", customer, token });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
-
 
 // Controller function to get a customer by ID
 exports.getCustomerById = async (req, res) => {
@@ -132,20 +133,19 @@ exports.getCustomerById = async (req, res) => {
 // Controller function to update a customer by ID
 
 exports.updateCustomer = async (req, res) => {
-  console.log("it is called!!")
+  console.log("it is called!!");
   try {
     // Extract customer ID from route parameters
     const customerId = req.params.id;
 
-    console.log("customerId--->>", customerId)
+    console.log("customerId--->>", customerId);
 
     // Extract new customer details from request body
     const updatedData = req.body;
 
-
     // Handle file uploads if any
     if (req.files && req.files.length > 0) {
-      const filePaths = req.files.map(file => file.path);
+      const filePaths = req.files.map((file) => file.path);
       updatedData.image = filePaths[0]; // Assuming one image per customer, adjust as needed
     }
 
@@ -156,35 +156,34 @@ exports.updateCustomer = async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    console.log("updatedCustomer", updatedCustomer)
-
+    console.log("updatedCustomer", updatedCustomer);
 
     // Check if customer was found and updated
     if (!updatedCustomer) {
-      return res.status(404).json({ message: 'Customer not found' });
+      return res.status(404).json({ message: "Customer not found" });
     }
 
     // Respond with the updated customer details
     res.status(200).json(updatedCustomer);
   } catch (error) {
     // Handle errors and send error response
-    console.error('Error updating customer:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error updating customer:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 exports.updateFcm = async (req, res) => {
-  console.log("it is called!!")
+  console.log("it is called!!");
   try {
     // Extract customer ID from route parameters
     const customerId = req.params.id;
 
-    console.log("customerId--->>", customerId)
+    console.log("customerId--->>", customerId);
 
     // Extract new customer details from request body
     const updatedData = req.body;
 
-    console.log("updatedData-->>", updatedData)
+    console.log("updatedData-->>", updatedData);
 
     // Find the customer by ID and update their details
     const updatedCustomer = await Customer.findByIdAndUpdate(
@@ -195,18 +194,17 @@ exports.updateFcm = async (req, res) => {
 
     // Check if customer was found and updated
     if (!updatedCustomer) {
-      return res.status(404).json({ message: 'Customer not found' });
+      return res.status(404).json({ message: "Customer not found" });
     }
 
     // Respond with the updated customer details
     res.status(200).json(updatedCustomer);
   } catch (error) {
     // Handle errors and send error response
-    console.error('Error updating customer:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Error updating customer:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 
 // Controller function to delete a customer by ID
 exports.deleteCustomer = async (req, res) => {
@@ -225,7 +223,7 @@ exports.sendOtp = async (req, res) => {
   const { phoneNumber } = req.body;
 
   if (!phoneNumber) {
-    return res.status(400).json({ message: 'Phone number is required' });
+    return res.status(400).json({ message: "Phone number is required" });
   }
 
   // Generate a 6-digit OTP
@@ -234,24 +232,32 @@ exports.sendOtp = async (req, res) => {
   const result = await sendOtp(phoneNumber, otp);
 
   if (result) {
-    res.status(200).json({ message: 'OTP sent successfully', otp });
+    res.status(200).json({ message: "OTP sent successfully", otp });
   } else {
-    res.status(500).json({ message: 'Failed to send OTP' });
+    res.status(500).json({ message: "Failed to send OTP" });
   }
-}
-
+};
 
 // Controller function to save address and available localities for a user
 exports.saveAddressAndLocalities = async (req, res) => {
   try {
-    const { addressLine1,landmark, city, state, country, postalCode, availableLocalities, name, phone } = req.body;
+    const {
+      addressLine1,
+      landmark,
+      city,
+      state,
+      country,
+      postalCode,
+      name,
+      phone,
+    } = req.body;
     const { id } = req.params; // Assuming userId is passed in the URL params or request body
 
     // Find the user by userId
     const user = await Customer.findById(id);
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     // Check if shippingAddresses array is empty
@@ -266,7 +272,7 @@ exports.saveAddressAndLocalities = async (req, res) => {
         state,
         country,
         postalCode,
-        isActive: true // Set isActive to true for the first address
+        isActive: true, // Set isActive to true for the first address
       };
       user.shippingAddresses.push(newAddress);
     } else {
@@ -279,42 +285,59 @@ exports.saveAddressAndLocalities = async (req, res) => {
         city,
         state,
         country,
-        postalCode
+        postalCode,
       };
       user.shippingAddresses.push(newAddress);
     }
 
-    // Update user's availableLocalities
-    user.availableLocalities = availableLocalities;
+    // Set availableLocalities to the postalCode of the active address
+    const activeAddress = user.shippingAddresses.find((addr) => addr.isActive);
+    if (activeAddress) {
+      user.availableLocalities = activeAddress.postalCode;
+    }
 
     // Save the updated user
     await user.save();
 
-    return res.status(200).json({ message: 'Address and localities saved successfully', user });
+    return res
+      .status(200)
+      .json({ message: "Address and localities saved successfully", user });
   } catch (error) {
-    console.error('Error saving address and localities:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error("Error saving address and localities:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 exports.updateShippingAddress = async (req, res) => {
   try {
     const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
-    const { addressLine1,landmark, city, state, country, postalCode, name, phone, isActive } = req.body;
+    const {
+      addressLine1,
+      landmark,
+      city,
+      state,
+      country,
+      postalCode,
+      name,
+      phone,
+      isActive,
+    } = req.body;
 
-    console.log("landmark-->>", landmark)
+    console.log("landmark-->>", landmark);
 
     // Find the user by userId
     const user = await Customer.findById(id);
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     // Find the address by addressId
-    const addressIndex = user.shippingAddresses.findIndex(address => address._id.toString() === addressId);
+    const addressIndex = user.shippingAddresses.findIndex(
+      (address) => address._id.toString() === addressId
+    );
 
     if (addressIndex === -1) {
-      return res.status(404).json({ error: 'Address not found' });
+      return res.status(404).json({ error: "Address not found" });
     }
 
     // Update the address fields
@@ -328,18 +351,27 @@ exports.updateShippingAddress = async (req, res) => {
       state,
       country,
       postalCode,
-      isActive
+      isActive,
     };
+
+    // Set availableLocalities to the postalCode of the active address
+    const activeAddress = user.shippingAddresses.find((addr) => addr.isActive);
+    if (activeAddress) {
+      user.availableLocalities = activeAddress.postalCode;
+    }
 
     // Save the updated user
     await user.save();
 
-    return res.status(200).json({ message: 'Shipping address updated successfully', user });
+    return res
+      .status(200)
+      .json({ message: "Shipping address updated successfully", user });
   } catch (error) {
-    console.error('Error updating shipping address:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error("Error updating shipping address:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
+
 exports.deleteShippingAddress = async (req, res) => {
   try {
     const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
@@ -348,28 +380,47 @@ exports.deleteShippingAddress = async (req, res) => {
     const user = await Customer.findById(id);
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
-    // Find the address by addressId and remove it
-    const addressIndex = user.shippingAddresses.findIndex(address => address._id.toString() === addressId);
+    // Find the address by addressId
+    const addressIndex = user.shippingAddresses.findIndex(
+      (address) => address._id.toString() === addressId
+    );
 
     if (addressIndex === -1) {
-      return res.status(404).json({ error: 'Address not found' });
+      return res.status(404).json({ error: "Address not found" });
     }
+
+    // Check if the address being deleted is the active address
+    const isActiveAddress = user.shippingAddresses[addressIndex].isActive;
 
     // Remove the address from the array
     user.shippingAddresses.splice(addressIndex, 1);
 
+    // If the active address was deleted, set availableLocalities to null
+    if (isActiveAddress) {
+      user.availableLocalities = null;
+
+      // Optionally, you could make another address active (if any remain)
+      if (user.shippingAddresses.length > 0) {
+        user.shippingAddresses[0].isActive = true; // Set the first remaining address as active
+        user.availableLocalities = user.shippingAddresses[0].postalCode; // Update availableLocalities
+      }
+    }
+
     // Save the updated user
     await user.save();
 
-    return res.status(200).json({ message: 'Shipping address deleted successfully', user });
+    return res
+      .status(200)
+      .json({ message: "Shipping address deleted successfully", user });
   } catch (error) {
-    console.error('Error deleting shipping address:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error("Error deleting shipping address:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
+
 exports.getShippingAddresses = async (req, res) => {
   try {
     const { id } = req.params; // Assuming userId is passed in the URL params
@@ -378,7 +429,7 @@ exports.getShippingAddresses = async (req, res) => {
     const user = await Customer.findById(id);
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     // Retrieve the shipping addresses
@@ -386,8 +437,8 @@ exports.getShippingAddresses = async (req, res) => {
 
     return res.status(200).json({ shippingAddresses });
   } catch (error) {
-    console.error('Error fetching shipping addresses:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error("Error fetching shipping addresses:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 exports.setActiveAddress = async (req, res) => {
@@ -398,43 +449,52 @@ exports.setActiveAddress = async (req, res) => {
     const user = await Customer.findById(userId);
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     // Check if the addressId exists in the user's shippingAddresses
     const address = user.shippingAddresses.id(addressId);
 
     if (!address) {
-      return res.status(404).json({ error: 'Address not found' });
+      return res.status(404).json({ error: "Address not found" });
     }
 
     // Set all addresses to inactive
-    user.shippingAddresses.forEach(addr => {
+    user.shippingAddresses.forEach((addr) => {
       addr.isActive = false;
     });
 
     // Set the specific address to active
     address.isActive = true;
 
+    // Update availableLocalities with the postal code of the active address
+    user.availableLocalities = address.postalCode;
+
     // Save the updated user
     await user.save();
 
-    return res.status(200).json({ message: 'Address set as active successfully',user });
+    return res
+      .status(200)
+      .json({ message: "Address set as active successfully", user });
   } catch (error) {
-    console.error('Error setting active address:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error("Error setting active address:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
+
 exports.updateCustomerDocuments = async (req, res) => {
   try {
     const customers = await Customer.find({}); // Fetch all customer documents
 
     for (const customer of customers) {
-      if (customer.shippingAddresses && !Array.isArray(customer.shippingAddresses)) {
+      if (
+        customer.shippingAddresses &&
+        !Array.isArray(customer.shippingAddresses)
+      ) {
         // Convert shippingAddresses to an array if it's an object
         customer.shippingAddresses = [customer.shippingAddresses];
       }
-      
+
       // Ensure availableLocalities is updated as necessary, since the schema change might require different handling
       // if (typeof customer.availableLocalities === 'string') {
       //   customer.availableLocalities = customer.availableLocalities.split(','); // Example conversion, modify as needed
@@ -444,27 +504,28 @@ exports.updateCustomerDocuments = async (req, res) => {
       await customer.save();
     }
 
-    res.status(200).json({ message: 'Customer documents updated successfully' });
+    res
+      .status(200)
+      .json({ message: "Customer documents updated successfully" });
   } catch (error) {
-    console.error('Error updating customer documents:', error);
-    res.status(500).json({ message: 'Error updating customer documents', error });
+    console.error("Error updating customer documents:", error);
+    res
+      .status(500)
+      .json({ message: "Error updating customer documents", error });
   }
 };
-
-
 
 // Controller to fetch all customer with role 'customer'
 exports.getAllCustomers = async (req, res) => {
   try {
     // Fetch only customer with the role 'customer'
-    const customers = await Customer.find({ role: 'customer' });
-    console.log("customers api", customers)
+    const customers = await Customer.find({ role: "customer" });
+    console.log("customers api", customers);
     res.status(200).send(customers);
   } catch (error) {
     res.status(500).send(error);
   }
 };
-
 
 //restrict customer login
 exports.restrictCustomer = async (req, res) => {
@@ -480,20 +541,20 @@ exports.restrictCustomer = async (req, res) => {
 
     if (!updatedCustomer) {
       return res.status(404).json({
-        message: 'Customer not found'
+        message: "Customer not found",
       });
     }
 
     // Send response confirming the update
     res.status(200).json({
-      message: 'Customer restricted successfully',
-      customer: updatedCustomer
+      message: "Customer restricted successfully",
+      customer: updatedCustomer,
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({
-      message: 'Failed to restrict customer',
-      error: error.message
+      message: "Failed to restrict customer",
+      error: error.message,
     });
   }
 };
@@ -512,20 +573,20 @@ exports.unRestrictCustomer = async (req, res) => {
 
     if (!updatedCustomer) {
       return res.status(404).json({
-        message: 'Customer not found'
+        message: "Customer not found",
       });
     }
 
     // Send response confirming the update
     res.status(200).json({
-      message: 'Customer unrestricted successfully',
-      customer: updatedCustomer
+      message: "Customer unrestricted successfully",
+      customer: updatedCustomer,
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({
-      message: 'Failed to unrestrict customer',
-      error: error.message
+      message: "Failed to unrestrict customer",
+      error: error.message,
     });
   }
 };
@@ -534,35 +595,34 @@ exports.checkIfUserIsRestricted = async (req, res) => {
   try {
     const { email, contactNumber } = req.body;
 
-    console.log("contactNumber-->>", contactNumber, email)
+    console.log("contactNumber-->>", contactNumber, email);
 
     // Validate if at least one identifier is provided
     if (!email && !contactNumber) {
-      return res.status(400).json({ error: 'Email or contact number is required' });
+      return res
+        .status(400)
+        .json({ error: "Email or contact number is required" });
     }
 
     // Find the customer by email or contact number
-    const customer = await Customer.findOne({contactNumber});
+    const customer = await Customer.findOne({ contactNumber });
 
-    console.log("customer--->>", customer)
+    console.log("customer--->>", customer);
 
     // If customer is not found, return an error
     if (!customer) {
-      return res.status(200).json({ error: 'Customer not found' });
+      return res.status(200).json({ error: "Customer not found" });
     }
 
     // Check if the customer is restricted
     if (customer.isRestricted) {
-      return res.status(403).json({ message: 'User is restricted' });
+      return res.status(403).json({ message: "User is restricted" });
     }
 
     // If the user is not restricted
-    return res.status(200).json({ message: 'User is not restricted' });
-
+    return res.status(200).json({ message: "User is not restricted" });
   } catch (error) {
     // Handle any errors
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
-
-
