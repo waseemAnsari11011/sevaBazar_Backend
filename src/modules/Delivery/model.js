@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
 // Define the schema
@@ -11,17 +11,17 @@ const deliverySchema = new Schema({
   },
   contactNumber: {
     type: String,
-    required: true
+    required: true,
   },
 
   role: {
     type: String,
-    default: 'delivery man'
+    default: "delivery man",
   },
   address: {
     type: String,
   },
-  vehicleDetails:{
+  vehicleDetails: {
     type: String,
   },
 
@@ -30,21 +30,20 @@ const deliverySchema = new Schema({
   },
   isRestricted: {
     type: Boolean,
-    default: false
+    default: false,
   },
   createdAt: {
     type: Date,
-    default: Date.now
+    default: Date.now,
   },
   updatedAt: {
     type: Date,
-    default: Date.now
-  }
+    default: Date.now,
+  },
 });
 
-
 // Create the model
-const Delivery = mongoose.model('Delivery', deliverySchema);
+const Delivery = mongoose.model("Delivery", deliverySchema);
 
 module.exports = Delivery;
 //

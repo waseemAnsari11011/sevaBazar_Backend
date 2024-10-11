@@ -355,6 +355,7 @@ const processDeliveryNotifications = async () => {
 
     // Map the notifications to promises
     const pushNotificationPromises = deliveryPersonnel.map((deliveryPerson) => {
+      console.log("deliveryPerson.fcmDeviceToken==>>", deliveryPerson);
       if (deliveryPerson.fcmDeviceToken) {
         return sendPushNotification(
           deliveryPerson.fcmDeviceToken,
