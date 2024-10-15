@@ -327,11 +327,11 @@ exports.createOrder = async (req, res) => {
 
       // console.log("vendor.vendor.email-->>", vendorDetails)
 
-      // await emailService.sendNewOrderNotificationEmail(
-      //   vendorDetails.email,
-      //   savedOrder,
-      //   customerDetails.contactNumber
-      // );
+      await emailService.sendNewOrderNotificationEmail(
+        vendorDetails.email,
+        savedOrder,
+        customerDetails.contactNumber
+      );
     }
 
     await session.commitTransaction();
