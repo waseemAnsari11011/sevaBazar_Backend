@@ -347,8 +347,9 @@ exports.getAllProducts = async (req, res) => {
       ? {
           availableLocalities: { $in: [userLocation, "all"] },
           quantity: { $gt: 0 },
+          isVisible: true,
         }
-      : { quantity: { $gt: 0 } };
+      : { quantity: { $gt: 0 }, isVisible: true };
 
     // Find the most recently added products with the location filter
     const products = await Product.find(locationFilter)
@@ -875,9 +876,10 @@ exports.getallCategoryProducts = async (req, res) => {
     const result = await Promise.all(
       categories.map(async (category) => {
         // Fetch a maximum of 4 products for each category
-        const products = await Product.find({ category: category._id }).limit(
-          4
-        );
+        const products = await Product.find({
+          category: category._id,
+          isVisible: true,
+        }).limit(4);
 
         // Return an object containing the category ID, name, and its products
         return {
@@ -895,5 +897,62 @@ exports.getallCategoryProducts = async (req, res) => {
     res
       .status(500)
       .json({ message: "Failed to fetch category products", error });
+  }
+};
+
+exports.makeActive = async (req, res) => {
+  try {
+    // Expecting the number of products to activate per category in the request body.
+    const count = parseInt(req.body.count, 10);
+    console.log("count==>>", count);
+    if (!count || count <= 0) {
+      return res.status(400).json({
+        message:
+          "Please provide a valid positive number for products to activate per category.",
+      });
+    }
+
+    // Get all distinct categories from the Product collection.
+    const categories = await Product.distinct("category");
+
+    let totalUpdated = 0;
+
+    // For each category, update up to `count` products to active (isVisible: true).
+    for (const category of categories) {
+      // Find up to `count` products in this category that are not active.
+      const productsToUpdate = await Product.find({
+        category,
+        isVisible: false,
+      })
+        .limit(count)
+        .select("_id");
+
+      if (productsToUpdate.length > 0) {
+        const productIds = productsToUpdate.map((prod) => prod._id);
+        const result = await Product.updateMany(
+          { _id: { $in: productIds } },
+          { isVisible: true }
+        );
+        // Depending on your mongoose version, the number of modified docs may be in modifiedCount or nModified.
+        totalUpdated += result.modifiedCount || result.nModified || 0;
+      }
+    }
+
+    res.status(200).json({
+      message: `Activated ${totalUpdated} products across ${categories.length} categories.`,
+    });
+  } catch (error) {
+    console.error("Error making products active:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+exports.makeInActive = async (req, res) => {
+  try {
+    await Product.updateMany({}, { isVisible: false });
+    res.status(200).json({ message: "All products are now inactive." });
+  } catch (error) {
+    console.error("Error making products inactive:", error);
+    res.status(500).json({ error: "Internal server error." });
   }
 };
