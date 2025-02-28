@@ -336,40 +336,6 @@ exports.getAllProductsVendor = async (req, res) => {
   }
 };
 
-exports.getAllProducts = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const userLocation = req.query.userLocation;
-
-    // Construct the filter for availableLocalities
-    const locationFilter = userLocation
-      ? {
-          availableLocalities: { $in: [userLocation, "all"] },
-          quantity: { $gt: 0 },
-          isVisible: true,
-        }
-      : { quantity: { $gt: 0 }, isVisible: true };
-
-    // Find the most recently added products with the location filter
-    const products = await Product.find(locationFilter)
-      .skip((page - 1) * limit)
-      .limit(limit);
-
-    // Count the total number of products with the location filter
-    const totalProducts = await Product.countDocuments(locationFilter);
-
-    res.json({
-      total: totalProducts,
-      page,
-      limit,
-      products,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
 // Controller to get products with low quantity
 exports.getProductsLowQuantity = async (req, res) => {
   try {
@@ -866,17 +832,52 @@ exports.addIsVisibleField = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+exports.getAllProducts = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const userLocation = req.query.userLocation;
 
+    // Construct the filter for availableLocalities
+    const locationFilter = userLocation
+      ? {
+          availableLocalities: { $in: [userLocation, "all"] },
+          quantity: { $gt: 0 },
+          isVisible: true,
+        }
+      : { quantity: { $gt: 0 }, isVisible: true };
+
+    // Find the most recently added products with the location filter
+    const products = await Product.find(locationFilter)
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    // Count the total number of products with the location filter
+    const totalProducts = await Product.countDocuments(locationFilter);
+
+    res.json({
+      total: totalProducts,
+      page,
+      limit,
+      products,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 exports.getallCategoryProducts = async (req, res) => {
   try {
     // Fetch all categories
     const categories = await Category.find();
+
+    const userLocation = req.query.userLocation;
 
     // Prepare the result array
     const result = await Promise.all(
       categories.map(async (category) => {
         // Fetch a maximum of 4 products for each category
         const products = await Product.find({
+          availableLocalities: { $in: [userLocation, "all"] },
           category: category._id,
           isVisible: true,
         }).limit(4);
