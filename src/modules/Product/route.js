@@ -53,4 +53,6 @@ router.get("/allCategoryProducts", productController.getallCategoryProducts);
 router.post("/makeActive", productController.makeActive);
 router.post("/makeInActive", productController.makeInActive);
 
+router.get("/search", productController.searchVendorProducts);
+
 module.exports = router;

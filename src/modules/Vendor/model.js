@@ -1,6 +1,6 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
-const bcrypt = require('bcrypt');
+const bcrypt = require("bcrypt");
 
 // Define the schema
 const vendorSchema = new Schema({
@@ -9,12 +9,12 @@ const vendorSchema = new Schema({
   },
   password: {
     type: String,
-    required: true
+    required: true,
   },
   email: {
     type: String,
     required: true,
-    unique: true
+    unique: true,
   },
   vendorInfo: {
     businessName: {
@@ -22,11 +22,11 @@ const vendorSchema = new Schema({
     },
     contactNumber: {
       type: String,
-      required: true
+      required: true,
     },
     alternativeContactNumber: {
       type: String,
-      required: true
+      required: true,
     },
     address: {
       addressLine1: {
@@ -44,25 +44,56 @@ const vendorSchema = new Schema({
       },
       postalCode: {
         type: String,
-      }
-    }
+      },
+    },
   },
+
+  // 👇 New fields for Dukaan visibility
+  isOnline: {
+    type: Boolean,
+    default: true, // by default dukaan is online
+  },
+  status: {
+    type: String,
+    enum: ["online", "offline"],
+    default: "online",
+  },
+
+  // 👇 New field for location-based listing
+  location: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point",
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      index: "2dsphere", // for geospatial queries
+    },
+  },
+
+  category: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Category",
+    required: true,
+  },
+
   role: {
     type: String,
-    default: 'vendor'
+    default: "vendor",
   },
   isRestricted: {
     type: Boolean,
-    default: false
+    default: false,
   },
   createdAt: {
     type: Date,
-    default: Date.now
+    default: Date.now,
   },
   updatedAt: {
     type: Date,
-    default: Date.now
-  }
+    default: Date.now,
+  },
 });
 
 // Method to compare passwords
@@ -72,6 +103,6 @@ vendorSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 // Create the model
-const Vendor = mongoose.model('Vendor', vendorSchema);
+const Vendor = mongoose.model("Vendor", vendorSchema);
 
 module.exports = Vendor;

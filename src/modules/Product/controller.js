@@ -957,3 +957,20 @@ exports.makeInActive = async (req, res) => {
     res.status(500).json({ error: "Internal server error." });
   }
 };
+
+//Dukaan Details Page → Search Products
+
+// GET /products/search?vendorId=...&q=...
+exports.searchVendorProducts = async (req, res) => {
+  try {
+    const { vendorId, q } = req.query;
+    const products = await Product.find({
+      vendor: vendorId,
+      name: new RegExp(q, "i"),
+    });
+
+    res.status(200).json(products);
+  } catch (error) {
+    res.status(500).json({ message: "Error searching vendor products", error });
+  }
+};
