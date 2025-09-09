@@ -28,6 +28,29 @@ const vendorSchema = new Schema({
       type: String,
       required: true,
     },
+  },
+
+  isOnline: {
+    type: Boolean,
+    default: true,
+  },
+  status: {
+    type: String,
+    enum: ["online", "offline"],
+    default: "online",
+  },
+
+  // 👇 Location object now contains both the address and coordinates
+  location: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point",
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      index: "2dsphere",
+    },
     address: {
       addressLine1: {
         type: String,
@@ -45,30 +68,6 @@ const vendorSchema = new Schema({
       postalCode: {
         type: String,
       },
-    },
-  },
-
-  // 👇 New fields for Dukaan visibility
-  isOnline: {
-    type: Boolean,
-    default: true, // by default dukaan is online
-  },
-  status: {
-    type: String,
-    enum: ["online", "offline"],
-    default: "online",
-  },
-
-  // 👇 New field for location-based listing
-  location: {
-    type: {
-      type: String,
-      enum: ["Point"],
-      default: "Point",
-    },
-    coordinates: {
-      type: [Number], // [longitude, latitude]
-      index: "2dsphere", // for geospatial queries
     },
   },
 
@@ -98,7 +97,6 @@ const vendorSchema = new Schema({
 
 // Method to compare passwords
 vendorSchema.methods.comparePassword = async function (candidatePassword) {
-  // console.log("candidatePassword", candidatePassword)
   return bcrypt.compare(candidatePassword, this.password);
 };
 
