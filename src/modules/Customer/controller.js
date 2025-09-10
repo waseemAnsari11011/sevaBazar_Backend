@@ -133,7 +133,7 @@ exports.getCustomerById = async (req, res) => {
 // Controller function to update a customer by ID
 
 exports.updateCustomer = async (req, res) => {
-  console.log("it is called!!");
+  //console.log("it is called!!");
   try {
     // Extract customer ID from route parameters
     const customerId = req.params.id;
@@ -173,7 +173,7 @@ exports.updateCustomer = async (req, res) => {
 };
 
 exports.updateFcm = async (req, res) => {
-  console.log("it is called!!");
+  //console.log("it is called!!");
   try {
     // Extract customer ID from route parameters
     const customerId = req.params.id;

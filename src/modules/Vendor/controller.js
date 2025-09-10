@@ -285,6 +285,7 @@ exports.toggleVendorStatus = async (req, res) => {
 };
 
 exports.getVendorsByCategory = async (req, res) => {
+  console.log("getVendorsByCategory is called");
   try {
     const { categoryId } = req.params;
     const vendors = await Vendor.find({ category: categoryId }).select(
