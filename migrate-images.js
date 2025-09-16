@@ -111,8 +111,11 @@ const migrateProductImages = async (product) => {
           continue;
         }
 
-        const localFilePath = path.join(__dirname, "..", imagePath);
+        // Fix: Use current directory (__dirname) since files are in project root
+        const localFilePath = path.join(__dirname, imagePath);
         const fileName = path.basename(imagePath);
+
+        console.log(`🔍 Looking for file: ${localFilePath}`);
 
         if (fileExists(localFilePath)) {
           const s3Url = await uploadToS3(localFilePath, fileName);
@@ -157,8 +160,11 @@ const migrateProductImages = async (product) => {
               continue;
             }
 
-            const localFilePath = path.join(__dirname, "..", imagePath);
+            // Fix: Use current directory (__dirname) since files are in project root
+            const localFilePath = path.join(__dirname, imagePath);
             const fileName = path.basename(imagePath);
+
+            console.log(`🔍 Looking for variation file: ${localFilePath}`);
 
             if (fileExists(localFilePath)) {
               const s3Url = await uploadToS3(localFilePath, fileName);
