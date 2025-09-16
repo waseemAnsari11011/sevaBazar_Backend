@@ -1,0 +1,5879 @@
+=== src/modules/Order/route.js ===
+const express = require('express');
+const router = express.Router();
+const orderController = require('../Order/controller');  // Adjust the path according to your project structure
+
+// Create a new order
+router.post('/order', orderController.createOrder);
+router.post('/razorpay', orderController.createOrderRazorpay);
+router.post('/razorpay-verify-payment', orderController.updatePaymentStatus);
+router.post('/manually-verify-payment', orderController.updatePaymentStatusManually);
+
+router.get('/order/vendor/:vendorId', orderController.getOrdersByVendor);
+router.get('/new-order/vendor/:vendorId', orderController.getNewOrdersCountByVendor);
+router.get('/order/recent-order/:vendorId', orderController.getRecentOrdersByVendor);
+
+router.put('/order/status/:orderId/vendor/:vendorId', orderController.updateOrderStatus);
+// router.get('/orders/customer/:customerId', orderController.getOrdersByCustomerAndStatus);
+// Route to get all orders by customer ID
+router.get('/orders/customer/:customerId', orderController.getOrdersByCustomerId);
+router.get('/order-history/:customerId', orderController.getOrdersHistoryByCustomerId);
+router.get('/mark-viewed/orders/:vendorId', orderController.markOrderViewed);
+router.get('/delivery/unaccepted-orders', orderController.getUnacceptedOrders);
+router.put('/delivery/accept-order/:deliveryManId', orderController.acceptOrder);
+
+
+
+module.exports = router;
+
+
+=== src/modules/Order/controller.js ===
+const Order = require('../Order/model');  // Adjust the path according to your project structure
+const Product = require('../Product/model');
+const mongoose = require('mongoose');
+const Razorpay = require('razorpay');
+const crypto = require('crypto');
+const Vendor = require('../Vendor/model');
+const Customer = require('../Customer/model')
+const emailService = require('../utils/emailService');
+const { sendPushNotification } = require('../utils/pushNotificationUtil');
+
+//razorpay
+const razorpay = new Razorpay({
+    key_id: process.env.KEY_ID,
+    key_secret: process.env.KEY_SECRET
+});
+
+exports.createOrderRazorpay = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+        const { customer, vendors, shippingAddress } = req.body;
+
+        // Validate required fields
+        if (!customer || !vendors || !shippingAddress) {
+            return res.status(400).json({ error: 'All required fields must be provided' });
+        }
+
+        // Validate each vendor and their products
+        for (const vendor of vendors) {
+            if (!vendor.vendor || !vendor.products) {
+                return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
+            }
+            for (const product of vendor.products) {
+                if (!product.product || !product.quantity || !product.price || !product.variations) {
+                    return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
+                }
+            }
+        }
+
+        for (const vendor of vendors) {
+            for (const productInfo of vendor.products) {
+                const product = await Product.findById(productInfo.product);
+                if (!product) {
+                    return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
+                }
+                if (product.quantity < productInfo.quantity) {
+                    return res.status(400).json({ error: `Not enough quantity available for product ${product.name}` });
+                }
+            }
+        }
+
+        // Create a new order instance
+        const newOrder = new Order({
+            customer,
+            vendors,
+            shippingAddress
+        });
+
+        // Save the order to the database
+        const savedOrder = await newOrder.save();
+
+        // Calculate total amount for the order
+        let totalAmount = 0;
+        savedOrder.vendors.forEach(vendor => {
+            vendor.products.forEach(product => {
+                totalAmount += product.totalAmount;
+            });
+        });
+
+        // Create Razorpay order
+        const options = {
+            amount: totalAmount * 100, // Amount in paisa
+            currency: 'INR',
+            receipt: savedOrder._id.toString()
+        };
+        const razorpayOrder = await razorpay.orders.create(options);
+
+        await session.commitTransaction();
+        session.endSession();
+
+        // Send response with order details and Razorpay order
+        res.status(201).json({
+            order: savedOrder,
+            razorpayOrder
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error("error--->>", error)
+        res.status(400).json({ error: error.message });
+    }
+};
+
+
+exports.updatePaymentStatus = async (req, res) => {
+
+    try {
+        // Extract required fields from the request body
+        const { orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature, vendors } = req.body;
+
+        console.log("vendors-->>", vendors)
+
+        // Ensure all required fields are present
+        if (!orderId || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Find the order in the database using the orderId
+        const order = await Order.findById(orderId);
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Create a hmac object using the key_secret
+        const hmac = crypto.createHmac('sha256', razorpay.key_secret);
+
+        // Generate the expected signature
+        hmac.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+        const generated_signature = hmac.digest('hex');
+
+        // Verify the signature
+        if (generated_signature === razorpay_signature) {
+            // Update the order status to reflect successful payment
+            order.isPaymentVerified = true;
+            order.paymentStatus = 'Paid';
+            order.razorpay_payment_id = razorpay_payment_id;
+            order.razorpay_order_id = razorpay_order_id;
+            order.razorpay_signature = razorpay_signature;
+
+            // Update product quantities and save the order to the database
+            for (const vendor of vendors) {
+                for (const productInfo of vendor.products) {
+                    const product = await Product.findById(productInfo.product);
+                    product.quantity -= productInfo.quantity;
+                    await product.save();
+                }
+            }
+
+        } else {
+            // Update the order status to reflect failed payment
+            order.isPaymentVerified = false;
+            order.paymentStatus = 'Unpaid';
+        }
+
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        res.status(200).json(updatedOrder);
+    } catch (error) {
+        console.log("error-->>", error)
+        res.status(400).json({ error: error.message });
+    }
+};
+
+exports.updatePaymentStatusManually = async (req, res) => {
+    try {
+        console.log("updatePaymentStatus")
+        // Extract required fields from the request body
+        const { orderId, newStatus } = req.body;
+
+        // Ensure all required fields are present
+        if (!newStatus || !orderId) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Find the order in the database using the orderId
+        let order = await Order.findById(orderId);
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (newStatus === 'Paid') {
+            order.isPaymentVerified = true;
+            order.paymentStatus = 'Paid';
+        } else {
+            order.isPaymentVerified = false;
+            order.paymentStatus = 'Unpaid';
+        }
+
+
+
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        res.status(200).json(updatedOrder);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+
+//
+
+exports.createOrder = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { customer, vendors, shippingAddress } = req.body;
+
+        console.log("shippingAddress==>>>>", shippingAddress)
+
+        // Validate required fields
+        if (!customer || !vendors || !shippingAddress) {
+            return res.status(400).json({ error: 'All required fields must be provided' });
+        }
+        const customerDetails = await Customer.findById(customer);
+        console.log("customerDetails--->", customerDetails)
+
+
+        // Validate each vendor and their products
+        for (const vendor of vendors) {
+            if (!vendor.vendor || !vendor.products) {
+                return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
+            }
+            for (const product of vendor.products) {
+                if (!product.product || !product.quantity || !product.price || !product.variations) {
+                    return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
+                }
+            }
+        }
+
+
+
+        // Update product quantities and save the order to the database
+        for (const vendor of vendors) {
+            for (const productInfo of vendor.products) {
+                const product = await Product.findById(productInfo.product);
+                if (!product) {
+                    return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
+                }
+
+                // Loop through each ordered variation
+                for (const orderedVariation of productInfo.variations) {
+                    // Find the matching variation in the product's variations
+                    const productVariation = product.variations.find(
+                        variation => variation._id.toString() === orderedVariation._id
+                    );
+
+                    if (productVariation) {
+                        // Decrease the quantity of the matching variation by the ordered quantity
+                        productVariation.quantity -= orderedVariation.quantity;
+
+                        // Check for negative quantity and handle it appropriately if needed
+                        if (productVariation.quantity < 0) {
+                            return res.status(400).json({ error: `Insufficient quantity for variation ${orderedVariation._id}` });
+                        }
+                    } else {
+                        return res.status(400).json({ error: `Variation with ID ${orderedVariation._id} not found in product ${productInfo.product}` });
+                    }
+                }
+
+                // Sum the quantities of all variations
+                const totalQuantity = product.variations.reduce((sum, variation) =>
+                    variation.parentVariation === null ? sum + variation.quantity : sum, 0);
+
+                // Update the root-level quantity of the product
+                product.quantity = totalQuantity;
+                productInfo.name = product.name
+                // Save the updated product document back to the database
+                await product.save();
+            }
+        }
+
+        // Create a new order instance
+        const newOrder = new Order({
+            customer,
+            vendors,
+            shippingAddress,
+            name: customerDetails.name
+        });
+
+        console.log("vendor-->>", vendors[0].products)
+
+        // Save the order to the database
+        const savedOrder = await newOrder.save();
+
+        // Send order confirmation email to customer
+        // await emailService.sendOrderConfirmationEmail(customer.email, savedOrder);
+
+
+
+
+        // Send new order notification email to each vendor
+        for (const vendor of vendors) {
+
+            const vendorId = new mongoose.Types.ObjectId(vendor.vendor);
+
+            // Fetch the vendor's role using the vendorId
+            const vendorDetails = await Vendor.findById(vendorId)
+
+            // console.log("vendor.vendor.email-->>", vendorDetails)
+
+            await emailService.sendNewOrderNotificationEmail(vendorDetails.email, savedOrder, customerDetails.contactNumber);
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+
+        res.status(201).json(savedOrder);
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        res.status(400).json({ error: error.message });
+    }
+};
+
+
+// Controller function to get all orders for a particular vendor
+
+exports.getOrdersByVendor = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
+        const vendorOrders = await Order.aggregate([
+            ...pipeline,
+            {
+                $lookup: {
+                    from: "customers", // The name of the customers collection
+                    localField: "customer",
+                    foreignField: "_id",
+                    as: "customerDetails"
+                }
+            },
+            // Unwind the customerDetails array to get the object
+            { $unwind: "$customerDetails" },
+            // Lookup to join vendor details
+            {
+                $lookup: {
+                    from: "vendors", // The name of the vendors collection
+                    localField: "vendors.vendor",
+                    foreignField: "_id",
+                    as: "vendorDetails"
+                }
+            },
+            // Unwind the vendorDetails array to get the object
+            { $unwind: "$vendorDetails" },
+            // Unwind the products array to work with individual product documents
+            { $unwind: "$vendors.products" },
+            // Lookup to join product details
+            {
+                $lookup: {
+                    from: "products", // The name of the products collection
+                    localField: "vendors.products.product",
+                    foreignField: "_id",
+                    as: "productDetails"
+                }
+            },
+            // Unwind the productDetails array to get the object
+            { $unwind: "$productDetails" },
+            // Group back the products and vendors
+            {
+                $group: {
+                    _id: {
+                        orderId: "$_id",
+                        shortId: "$orderId",
+                        customer: "$customerDetails",
+                        shippingAddress: "$shippingAddress",
+                        vendor: "$vendorDetails",
+                        orderStatus: "$vendors.orderStatus",
+                        isPaymentVerified: "$isPaymentVerified",
+                        paymentStatus: "$paymentStatus",
+                        razorpay_payment_id: "$razorpay_payment_id",
+                        createdAt: "$createdAt",
+                        is_new: "$is_new"
+                    },
+                    products: {
+                        $push: {
+                            product: "$productDetails",
+                            quantity: "$vendors.products.quantity",
+                            price: "$vendors.products.price",
+                            discount: "$vendors.products.discount",
+                            orderedVariations: "$vendors.products.variations",
+                            _id: "$vendors.products._id",
+                            totalAmount: "$vendors.products.totalAmount"
+                        }
+                    }
+                }
+            },
+            // Project to reshape the output document
+            {
+                $project: {
+                    _id: 0,
+                    orderId: "$_id.orderId",
+                    shortId: "$_id.shortId",
+                    customer: "$_id.customer",
+                    shippingAddress: "$_id.shippingAddress",
+                    isPaymentVerified: "$_id.isPaymentVerified",
+                    paymentStatus: "$_id.paymentStatus",
+                    razorpay_payment_id: "$_id.razorpay_payment_id",
+                    createdAt: "$_id.createdAt",
+                    is_new: "$_id.is_new",
+                    vendors: {
+                        vendor: "$_id.vendor",
+                        orderStatus: "$_id.orderStatus",
+                        products: "$products"
+                    }
+                }
+            },
+            // Sort by createdAt in descending order
+            { $sort: { createdAt: -1 } }
+        ]);
+
+        res.status(200).json({
+            success: true,
+            data: vendorOrders
+        });
+    } catch (error) {
+        console.error("Error fetching orders for vendor: ", error);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error'
+        });
+    }
+};
+exports.getNewOrdersCountByVendor = async (req, res) => {
+    try {
+        const vendorId = req.params.vendorId; // Assuming vendorId is passed as a URL parameter
+
+        // Count new orders for the specific vendor
+        const newOrdersCount = await Order.countDocuments({
+            'vendors.vendor': vendorId,
+            is_new: true
+        });
+
+        // console.log("newOrdersCount-->>", newOrdersCount)
+
+        res.status(200).json({ newOrdersCount });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'An error occurred while retrieving new orders count.' });
+    }
+};
+
+
+exports.getRecentOrdersByVendor = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+
+        const recentVendorOrders = await Order.aggregate([
+            { $unwind: "$vendors" },
+            { $match: { "vendors.vendor": vendorId } },
+            {
+                $lookup: {
+                    from: "customers",
+                    localField: "customer",
+                    foreignField: "_id",
+                    as: "customerDetails"
+                }
+            },
+            { $unwind: "$customerDetails" },
+            {
+                $lookup: {
+                    from: "vendors",
+                    localField: "vendors.vendor",
+                    foreignField: "_id",
+                    as: "vendorDetails"
+                }
+            },
+            { $unwind: "$vendorDetails" },
+            { $unwind: "$vendors.products" },
+            {
+                $lookup: {
+                    from: "products",
+                    localField: "vendors.products.product",
+                    foreignField: "_id",
+                    as: "productDetails"
+                }
+            },
+            { $unwind: "$productDetails" },
+            {
+                $group: {
+                    _id: {
+                        orderId: "$_id",
+                        customer: "$customerDetails",
+                        shippingAddress: "$shippingAddress",
+                        vendor: "$vendorDetails",
+                        orderStatus: "$vendors.orderStatus",
+                        isPaymentVerified: "$isPaymentVerified",
+                        paymentStatus: "$paymentStatus",
+                        razorpay_payment_id: "$razorpay_payment_id",
+                        createdAt: "$createdAt"
+                    },
+                    products: {
+                        $push: {
+                            product: "$productDetails",
+                            quantity: "$vendors.products.quantity",
+                            price: "$vendors.products.price",
+                            discount: "$vendors.products.discount",
+                            _id: "$vendors.products._id",
+                            totalAmount: "$vendors.products.totalAmount"
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    orderId: "$_id.orderId",
+                    customer: "$_id.customer",
+                    shippingAddress: "$_id.shippingAddress",
+                    isPaymentVerified: "$_id.isPaymentVerified",
+                    paymentStatus: "$_id.paymentStatus",
+                    razorpay_payment_id: "$_id.razorpay_payment_id",
+                    createdAt: "$_id.createdAt",
+                    vendors: {
+                        vendor: "$_id.vendor",
+                        orderStatus: "$_id.orderStatus",
+                        products: "$products"
+                    }
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 5 }
+        ]);
+
+        res.status(200).json({
+            success: true,
+            data: recentVendorOrders
+        });
+    } catch (error) {
+        console.error("Error fetching recent orders for vendor: ", error);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error'
+        });
+    }
+};
+
+
+
+exports.updateOrderStatus = async (req, res) => {
+    const { orderId, vendorId } = req.params;
+    const { newStatus } = req.body;
+
+    try {
+        // Find the order by ID and update the status for the specific vendor
+        const order = await Order.findOneAndUpdate(
+            { _id: new mongoose.Types.ObjectId(orderId), 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) },
+            { $set: { 'vendors.$.orderStatus': newStatus } },
+            { new: true }
+        ).populate('customer'); // Ensure customer details are populated
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order or vendor not found' });
+        }
+
+        // If the new status is 'Delivered', calculate and update deliveredInMin at the vendor level
+        if (newStatus === 'Delivered') {
+            const currentTime = new Date();
+            const createdAt = order.createdAt;
+            const deliveredInMin = Math.floor((currentTime - createdAt) / 60000); // Difference in minutes
+            console.log("deliveredInMin-->", deliveredInMin)
+
+            // Update the deliveredInMin field for the specific vendor
+            order.vendors.forEach(vendor => {
+                if (vendor.vendor.equals(vendorId)) {
+                    vendor.deliveredInMin = deliveredInMin;
+                }
+            });
+
+            // Save the updated order
+            await order.save();
+        }
+
+        // Extract customer ID from the order
+        const customerId = order.customer._id;
+
+        // Retrieve the customer from database to get FCM token
+        const customer = await Customer.findById(customerId);
+        if (!customer) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+
+        const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
+
+        const title = 'Order Status Updated';
+        const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
+        try {
+            // Assuming you have a function or service to send push notifications
+            let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+            console.log("Push notification response:", pushNotificationRes);
+        } catch (error) {
+            console.error('Error sending push notification:', error);
+        }
+
+        res.json(order);
+    } catch (error) {
+        console.error('Error updating order status:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+
+
+
+
+
+
+exports.getOrdersByCustomerAndStatus = async (req, res) => {
+    const { customerId } = req.params;
+    const { status } = req.query;
+
+    try {
+        // Convert customerId to a mongoose ObjectId
+        const customerObjectId = new mongoose.Types.ObjectId(customerId);
+
+        // Use aggregation pipeline to filter orders and vendors by status and lookup product details
+        const orders = await Order.aggregate([
+            {
+                $match: {
+                    customer: customerObjectId,
+                    'vendors.orderStatus': status
+                }
+            },
+            {
+                $unwind: '$vendors'
+            },
+            {
+                $unwind: '$vendors.products'
+            },
+            {
+                $match: {
+                    'vendors.orderStatus': status
+                }
+            },
+            {
+                $lookup: {
+                    from: 'products',
+                    localField: 'vendors.products.product',
+                    foreignField: '_id',
+                    as: 'productDetails'
+                }
+            },
+            {
+                $unwind: '$productDetails'
+            },
+            {
+                $group: {
+                    _id: '$_id',
+                    customer: { $first: '$customer' },
+                    shippingAddress: { $first: '$shippingAddress' },
+                    createdAt: { $first: '$createdAt' },
+                    updatedAt: { $first: '$updatedAt' },
+                    vendors: {
+                        $push: {
+                            vendor: '$vendors.vendor',
+                            products: {
+                                product: '$productDetails',
+                                quantity: '$vendors.products.quantity',
+                                price: '$vendors.products.price',
+                                discount: '$vendors.products.discount',
+                                _id: '$vendors.products._id',
+                                totalAmount: '$vendors.products.totalAmount'
+                            },
+                            orderStatus: '$vendors.orderStatus',
+                            _id: '$vendors._id'
+                        }
+                    }
+                }
+            },
+            {
+                $match: {
+                    vendors: { $ne: [] } // Ensure there are vendors with the specified status
+                }
+            }
+        ]);
+
+        // Check if orders exist
+        if (!orders || orders.length === 0) {
+            return res.status(404).json({ success: false, message: 'No orders found for the specified customer and status' });
+        }
+
+        res.status(200).json({ success: true, data: orders });
+    } catch (error) {
+        console.error('Error fetching orders:', error);
+        res.status(500).json({ success: false, message: 'Internal Server Error' });
+    }
+};
+
+exports.getOrdersByCustomerId = async (req, res) => {
+    try {
+        const customerId = req.params.customerId;
+        const orders = await Order.find({
+            customer: customerId,
+            'vendors.orderStatus': { $nin: ['Delivered', 'Cancelled'] }
+        })
+            .populate('customer')
+            .populate('vendors.vendor')
+            .populate('vendors.products.product')
+            .sort({ createdAt: -1 }) // Sort by createdAt in descending order (latest to oldest)
+            .exec();
+
+        res.status(200).json(orders);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+exports.getOrdersHistoryByCustomerId = async (req, res) => {
+    try {
+        const customerId = req.params.customerId;
+        const orders = await Order.find({
+            customer: customerId,
+            'vendors.orderStatus': { $in: ['Delivered', 'Cancelled'] }
+        })
+            .populate('customer')
+            .populate('vendors.vendor')
+            .populate('vendors.products.product')
+            .sort({ createdAt: -1 }) // Sort by createdAt in descending order (latest to oldest)
+            .exec();
+
+        res.status(200).json(orders);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+
+
+exports.markOrderViewed = async (req, res) => {
+    console.log("markOrderViewed is called")
+    try {
+        const vendorId = req.params.vendorId;
+
+        // Update only the orders for the given vendor to set is_new to false
+        await Order.updateMany(
+            { "vendors.vendor": vendorId, is_new: true },
+            { $set: { is_new: false } }
+        );
+
+        res.status(200).json({ message: 'Vendor-specific orders marked as viewed' });
+    } catch (error) {
+        res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
+    }
+};
+
+
+
+// Controller to get all unaccepted orders with populated customer details
+exports.getUnacceptedOrders = async (req, res) => {
+    try {
+        // Find all orders where acceptedBy is null or undefined
+        const unacceptedOrders = await Order.find({
+            acceptedBy: { $exists: false }
+        })
+        .select('orderId customer vendors shippingAddress createdAt')
+        .populate({
+            path: 'customer', 
+            select: 'name contactNumber image' // Select relevant customer details to return
+        });
+
+        // Send the found orders as a response
+        res.status(200).json({
+            success: true,
+            orders: unacceptedOrders
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Server Error',
+            error: error.message
+        });
+    }
+};
+
+
+exports.acceptOrder = async (req, res) => {
+    try {
+        const { orderId } = req.body; // Get the order ID from the request body
+        const { deliveryManId } = req.params; // Assuming deliveryManId is passed as a URL parameter
+
+        console.log("orderId==>>", orderId)
+
+        // Find the order by ID and update the acceptedBy field
+        const updatedOrder = await Order.findOneAndUpdate(
+            { orderId: orderId }, // Match order by orderId
+            { acceptedBy: deliveryManId, is_new: false }, // Update acceptedBy and is_new fields
+            { new: true } // Return the updated order
+        ).populate('customer', 'name contactNumber'); // Optionally populate customer details
+
+        if (!updatedOrder) {
+            return res.status(404).json({
+                success: false,
+                message: 'Order not found'
+            });
+        }
+
+        // Send back the updated order details
+        res.status(200).json({
+            success: true,
+            message: 'Order accepted successfully',
+            order: updatedOrder
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Server Error',
+            error: error.message
+        });
+    }
+};
+
+
+
+
+
+=== src/modules/Order/model.js ===
+const mongoose = require("mongoose");
+const Schema = mongoose.Schema;
+
+// Define the Order Schema
+const orderSchema = new Schema({
+  orderId: {
+    type: String,
+    unique: true,
+    required: true,
+  },
+  customer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Customer",
+    required: true,
+  },
+  name: { type: String },
+  vendors: [
+    {
+      vendor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Vendor",
+        required: true,
+      },
+      products: [
+        {
+          product: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Product",
+            required: true,
+          },
+          name: { type: String },
+          variations: {
+            type: Array,
+          },
+          quantity: {
+            type: Number,
+            required: true,
+            min: 1,
+          },
+          price: {
+            type: Number,
+            required: true,
+            min: 0,
+          },
+          discount: {
+            type: Number,
+            default: 0,
+            min: 0,
+            max: 100,
+          },
+          totalAmount: {
+            type: Number,
+            min: 0,
+          },
+          arrivalAt: {
+            type: Date,
+          },
+        },
+      ],
+      deliveredInMin: {
+        type: Number,
+      },
+      orderStatus: {
+        type: String,
+        enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
+        default: "Pending",
+      },
+    },
+  ],
+  shippingAddress: mongoose.Schema.Types.Mixed,
+  isPaymentVerified: {
+    type: Boolean,
+    default: false,
+  },
+  paymentStatus: {
+    type: String,
+    enum: ["Paid", "Unpaid"],
+    default: "Unpaid",
+  },
+  razorpay_payment_id: {
+    type: String,
+  },
+  razorpay_order_id: {
+    type: String,
+  },
+  razorpay_signature: {
+    type: String,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+  acceptedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Delivery",
+  },
+  is_new: {
+    type: Boolean,
+    default: true,
+  },
+});
+
+// Pre-save middleware to generate a unique 6-digit orderId and calculate the total amount for each product
+orderSchema.pre("validate", async function (next) {
+  // Generate a unique 6-digit orderId if the document is new
+  if (this.isNew) {
+    let isUnique = false;
+
+    while (!isUnique) {
+      const uniqueId = Math.floor(100000 + Math.random() * 900000).toString();
+      const existingOrder = await mongoose.models.Order.findOne({
+        orderId: uniqueId,
+      });
+
+      if (!existingOrder) {
+        this.orderId = uniqueId;
+        isUnique = true;
+      }
+    }
+  }
+
+  // Populate product references to get availableLocalities
+  await this.populate({
+    path: "vendors.products.product",
+    select: "availableLocalities",
+  });
+
+  // Calculate the total amount for each product and set arrivalAt
+  this.vendors.forEach((vendor) => {
+    vendor.products.forEach((product) => {
+      const { availableLocalities } = product.product;
+      product.totalAmount =
+        (product.price - (product.price * product.discount) / 100) *
+        product.quantity;
+
+      const currentDay = new Date().getDay(); // 0 = Sunday, 6 = Saturday
+
+      const containsNumber = availableLocalities.some((loc) => /\d/.test(loc));
+      const containsAll = availableLocalities.includes("all");
+
+      if (containsAll && !containsNumber) {
+        if (currentDay === 6) {
+          // Saturday
+          product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
+        } else if (currentDay === 0) {
+          // Sunday
+          product.arrivalAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+        } else {
+          product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
+        }
+      } else if (containsNumber) {
+        product.arrivalAt = new Date(Date.now() + 90 * 60 * 1000); // 90 minutes
+      }
+    });
+  });
+
+  next();
+});
+
+// Create the Order Model
+const Order = mongoose.model("Order", orderSchema);
+
+// Export the Order Model
+module.exports = Order;
+
+
+=== src/modules/Middleware/authMiddleware.js ===
+const jwt = require('jsonwebtoken');
+require('dotenv').config();
+const secret = process.env.JWT_SECRET;
+
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];  // Extract the token from the "Bearer <token>" format
+
+
+    if (!token) {
+        return res.status(401).json({ message: 'Access denied. No token provided.' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, secret);
+
+        req.user = decoded;
+        next();
+    } catch (error) {
+        res.status(403).json({ message: 'Invalid token.' });
+    }
+};
+
+module.exports = authenticateToken;
+
+
+=== src/modules/Middleware/authorizeMiddleware.js ===
+const authorizeAdmin = (req, res, next) => {
+    if (req.user && req.user.role === 'admin') {
+        next();
+    } else {
+        res.status(403).json({ message: 'Access denied. You do not have permission to perform this action.' });
+    }
+};
+
+module.exports = authorizeAdmin;
+
+
+=== src/modules/Middleware/uploadHandler.js ===
+// utils/uploadHandler.js
+
+const upload = require('./uploadMiddleware'); // Adjust the path as necessary
+
+const handleUpload = (uploadDir) => (req, res, next) => {
+    const uploadMiddleware = upload(uploadDir);
+    uploadMiddleware(req, res, (err) => {
+        if (err) {
+            return res.status(400).send({ error: err.message });
+        }
+        next();
+    });
+};
+
+module.exports = handleUpload;
+
+
+=== src/modules/Middleware/uploadMiddleware.js ===
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+
+// Function to create multer storage with dynamic directory
+const getStorage = (uploadDir) => {
+    // Create the uploads directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    return multer.diskStorage({
+        destination: (req, file, cb) => {
+            cb(null, uploadDir); // Use the dynamic directory
+        },
+        filename: (req, file, cb) => {
+            cb(null, `${Date.now()}_${file.originalname}`);
+        }
+    });
+};
+
+// Middleware factory to handle both single and multiple file uploads
+const upload = (uploadDir) => multer({ storage: getStorage(uploadDir) }).any(); // Accepts any type of file or files
+
+module.exports = upload;
+
+
+=== src/modules/Inquiry/route.js ===
+const express = require('express');
+const router = express.Router();
+const inquiryController = require('./controller');
+const authenticateToken = require('../Middleware/authMiddleware');
+const authorizeAdmin = require('../Middleware/authorizeMiddleware');
+
+// Routes for user
+router.post('/inquiries', inquiryController.createInquiry);
+router.get('/inquiries/:id/user', inquiryController.getUserInquiries);
+
+// Routes for admin
+router.get('/inquiries', authenticateToken, authorizeAdmin, inquiryController.getAllInquiries);
+router.put('/inquiries/:id/respond', authenticateToken, authorizeAdmin, inquiryController.respondToInquiry);
+
+module.exports = router;
+
+
+=== src/modules/Inquiry/controller.js ===
+const Inquiry = require('./model');
+
+// Create a new inquiry
+exports.createInquiry = async (req, res) => {
+    try {
+        const { subject, message, user } = req.body;
+      
+        console.log("subject, message--->>>", subject, message, user)
+        const inquiry = new Inquiry({
+            user: user,
+            subject,
+            message
+        });
+        await inquiry.save();
+        res.status(201).json({ message: 'Inquiry submitted successfully', inquiry });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to submit inquiry', error: error.message });
+    }
+};
+
+// Get user inquiries (for user)
+exports.getUserInquiries = async (req, res) => {
+    try {
+        const userId = req.params.id
+        console.log("userId-->>", userId)
+        const inquiries = await Inquiry.find({ user: userId });
+        console.log("inquiries-->>", inquiries)
+
+        res.status(200).json(inquiries);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to get user inquiries', error: error.message });
+    }
+};
+
+
+
+// Get all inquiries (for admin)
+exports.getAllInquiries = async (req, res) => {
+    try {
+        const inquiries = await Inquiry.find().populate('user', 'name contactNumber');
+        res.status(200).json(inquiries);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to get inquiries', error: error.message });
+    }
+};
+
+// Respond to an inquiry (for admin)
+exports.respondToInquiry = async (req, res) => {
+    try {
+        const { Inquiryresponse } = req.body;
+        console.log("response-->>", Inquiryresponse, req.params.id)
+
+        const inquiry = await Inquiry.findById(req.params.id);
+
+
+        if (!inquiry) {
+            return res.status(404).json({ message: 'Inquiry not found' });
+        }
+
+        inquiry.response = Inquiryresponse;
+        inquiry.status = 'responded';
+        inquiry.respondedAt = Date.now();
+        await inquiry.save();
+
+        res.status(200).json({ message: 'Inquiry responded successfully', inquiry });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to respond to inquiry', error: error.message });
+    }
+};
+
+
+=== src/modules/Inquiry/model.js ===
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const inquirySchema = new Schema({
+    user: {
+        type: Schema.Types.ObjectId,
+        ref: 'Customer',
+        required: true
+    },
+    subject: {
+        type: String,
+        required: true
+    },
+    message: {
+        type: String,
+        required: true
+    },
+    response: {
+        type: String,
+        default: ''
+    },
+    status: {
+        type: String,
+        enum: ['pending', 'responded'],
+        default: 'pending'
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
+    },
+    respondedAt: {
+        type: Date
+    }
+});
+
+module.exports = mongoose.model('Inquiry', inquirySchema);
+
+
+=== src/modules/Category/route.js ===
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+const categoryController = require('./controller'); // Adjust the path as necessary
+const handleUpload = require('../Middleware/uploadHandler');
+const authenticateToken = require('../Middleware/authMiddleware');
+const authorizeAdmin = require('../Middleware/authorizeMiddleware');
+
+// Define the upload directory
+const uploadDir = 'uploads/category';
+
+
+// Route to add a new Category with file upload middleware
+router.post('/category', handleUpload(uploadDir), categoryController.addCategory);
+
+router.put('/category/:id', handleUpload(uploadDir), categoryController.updateCategory);
+router.delete('/category/:id', categoryController.deleteCategory);
+router.get('/category', categoryController.getAllCategory);
+router.get('/category/:id', categoryController.getCategoryById);
+
+module.exports = router;
+
+
+=== src/modules/Category/controller.js ===
+const Category = require('./model'); // Adjust the path as necessary
+const fs = require('fs');
+const path = require('path');
+
+// Controller function to add a new category
+exports.addCategory = async (req, res) => {
+
+    try {
+        const { name } = req.body;
+        const images = req.files.map(file => file.path); // Get the paths of the uploaded images
+
+        // Create a new category instance
+        const newCategory = new Category({
+            name,
+            images
+        });
+
+        // Save the category to the database
+        const savedCategory = await newCategory.save();
+
+        // Send response
+        res.status(201).json({
+            message: 'Category created successfully',
+            category: savedCategory
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to create category',
+            error: error.message
+        });
+    }
+};
+
+// Controller function to update an existing category
+exports.updateCategory = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, existingImages } = req.body;
+
+        // Find the category by ID
+        const category = await Category.findById(id);
+
+        if (!category) {
+            return res.status(404).json({
+                message: 'Category not found'
+            });
+        }
+
+        // Delete category images from the file system that are not in existingImages
+        category.images.forEach(imagePath => {
+            if (!existingImages.includes(imagePath)) {
+                // console.log("Deleting imagePath-->>", imagePath);
+                const fullPath = path.join(imagePath); // Adjust the path accordingly
+                fs.unlink(fullPath, err => {
+                    if (err) {
+                        console.error(`Failed to delete image file: ${fullPath}`, err);
+                    }
+                });
+            }
+        });
+
+        // Update the category details
+        category.name = name || category.name;
+
+        // Combine existing images and new uploaded images
+        const newImages = req.files.map(file => file.path);
+        category.images = existingImages ? existingImages.concat(newImages) : newImages;
+
+        // Save the updated category to the database
+        const updatedCategory = await category.save();
+
+        // Send response
+        res.status(200).json({
+            message: 'Category updated successfully',
+            category: updatedCategory
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to update category',
+            error: error.message
+        });
+    }
+};
+
+
+// Controller function to get all categories
+exports.getAllCategory = async (req, res) => {
+    try {
+        // Fetch all categories from the database
+        const categories = await Category.find();
+
+        // Send the categories in the response
+        res.status(200).json({
+            message: 'Categories retrieved successfully',
+            categories
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to retrieve categories',
+            error: error.message
+        });
+    }
+};
+
+// Controller function to get a category by ID
+exports.getCategoryById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Find the category by ID
+        const category = await Category.findById(id);
+
+        if (!category) {
+            return res.status(404).json({
+                message: 'Category not found'
+            });
+        }
+
+        // Send the category in the response
+        res.status(200).json({
+            message: 'Category retrieved successfully',
+            category
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to retrieve category',
+            error: error.message
+        });
+    }
+};
+
+
+// Controller function to delete a category by ID
+exports.deleteCategory = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Find and delete the category by ID
+        const deletedCategory = await Category.findByIdAndDelete(id);
+
+        if (!deletedCategory) {
+            return res.status(404).json({
+                message: 'Category not found'
+            });
+        }
+
+        // Delete category images from the file system
+        deletedCategory.images.forEach(imagePath => {
+            const fullPath = path.join( imagePath); // Adjust the path accordingly
+            fs.unlink(fullPath, err => {
+                if (err) {
+                    console.error(`Failed to delete image file: ${fullPath}`, err);
+                }
+            });
+        });
+
+        // Send response confirming deletion
+        res.status(200).json({
+            message: 'Category deleted successfully',
+            category: deletedCategory
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to delete category',
+            error: error.message
+        });
+    }
+};
+
+
+=== src/modules/Category/model.js ===
+// Import mongoose
+const mongoose = require('mongoose');
+
+// Define the Category Schema
+const categorySchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    images: {
+        type: [String],  // Array of strings to store image URLs or paths
+        validate: [arrayLimit, '{PATH} exceeds the limit of 10'] // Optional: Limit the number of images
+    },
+
+}, {
+    timestamps: true // Automatically add createdAt and updatedAt timestamps
+});
+
+// Custom validator to limit array size
+function arrayLimit(val) {
+    return val.length <= 10;
+}
+
+// Create the Category Model
+const Category = mongoose.model('Category', categorySchema);
+
+// Export the Category Model
+module.exports = Category;
+
+
+=== src/modules/HelpCenter/route.js ===
+const express = require('express');
+const router = express.Router();
+const helpCenterController = require('./controller');
+const authenticateToken = require('../Middleware/authMiddleware');
+const authorizeAdmin = require('../Middleware/authorizeMiddleware');
+
+// Route to create a new FAQ
+router.post('/faqs', authenticateToken, authorizeAdmin, helpCenterController.createFAQ);
+
+// Route to get all FAQs
+router.get('/faqs',  helpCenterController.getFAQs);
+
+// Route to get a single FAQ by ID
+router.get('/faqs/:id', authenticateToken, authorizeAdmin, helpCenterController.getFAQById);
+
+// Route to update an FAQ by ID
+router.put('/faqs/:id', authenticateToken, authorizeAdmin, helpCenterController.updateFAQ);
+
+// Route to delete an FAQ by ID
+router.delete('/faqs/:id', authenticateToken, authorizeAdmin, helpCenterController.deleteFAQ);
+
+module.exports = router;
+
+
+=== src/modules/HelpCenter/controller.js ===
+const FAQ = require('./model');
+
+// Create a new FAQ
+exports.createFAQ = async (req, res) => {
+  try {
+    const { question, answer } = req.body;
+    const faq = new FAQ({ question, answer });
+    await faq.save();
+    res.status(201).json(faq);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Get all FAQs
+exports.getFAQs = async (req, res) => {
+  try {
+    const faqs = await FAQ.find();
+    res.status(200).json(faqs);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Get a single FAQ by ID
+exports.getFAQById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const faq = await FAQ.findById(id);
+    if (!faq) {
+      return res.status(404).json({ error: 'FAQ not found' });
+    }
+    res.status(200).json(faq);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Update an FAQ
+exports.updateFAQ = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { question, answer } = req.body;
+    const faq = await FAQ.findByIdAndUpdate(id, { question, answer, updated_at: Date.now() }, { new: true });
+    if (!faq) {
+      return res.status(404).json({ error: 'FAQ not found' });
+    }
+    res.status(200).json(faq);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Delete an FAQ
+exports.deleteFAQ = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const faq = await FAQ.findByIdAndDelete(id);
+    if (!faq) {
+      return res.status(404).json({ error: 'FAQ not found' });
+    }
+    res.status(204).send();
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+
+
+=== src/modules/HelpCenter/model.js ===
+const mongoose = require('mongoose');
+
+// Define the FAQ schema
+const faqSchema = new mongoose.Schema({
+  question: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  answer: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  created_at: {
+    type: Date,
+    default: Date.now,
+  },
+  updated_at: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+// Middleware to update the updated_at field on save
+faqSchema.pre('save', function (next) {
+  this.updated_at = Date.now();
+  next();
+});
+
+// Create the FAQ model
+const FAQ = mongoose.model('FAQ', faqSchema);
+
+module.exports = FAQ;
+
+
+=== src/modules/utils/pushNotificationUtil.js ===
+const admin = require('firebase-admin');
+const serviceAccount = require('../../../firebaseConfig.json');
+
+// Initialize Firebase Admin SDK
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const sendPushNotification = async (deviceToken, title, body) => {
+  if (!deviceToken || !title || !body) {
+    throw new Error('Device token, title, and body are required');
+  }
+
+  const message = {
+    notification: {
+      title: title,
+      body: body,
+    },
+    token: deviceToken,
+  };
+
+  try {
+    const response = await admin.messaging().send(message);
+    return `Successfully sent message: ${response}`;
+  } catch (error) {
+    console.error('Error sending message:', error);
+    throw new Error('Error sending message');
+  }
+};
+
+module.exports = {
+  sendPushNotification,
+};
+
+
+=== src/modules/utils/sendOtp.js ===
+const axios = require('axios');
+require('dotenv').config();
+
+const GUPSHUP_API_KEY = process.env.GUPSHUP_API_KEY;
+const GUPSHUP_SENDER_ID = process.env.GUPSHUP_SENDER_ID;
+
+const sendOtp = async (phoneNumber, otp) => {
+    const url = `https://api.gupshup.io/sm/api/v1/msg`;
+
+    const message = `Your OTP is ${otp}`;
+
+    try {
+        const response = await axios.post(url, null, {
+            params: {
+                apiKey: GUPSHUP_API_KEY,
+                channel: 'sms',
+                source: GUPSHUP_SENDER_ID,
+                destination: phoneNumber,
+                message: message,
+            },
+        });
+
+        if (response.data && response.data.status === 'submitted') {
+            console.log('OTP sent successfully');
+            return true;
+        } else {
+            console.error('Failed to send OTP');
+            return false;
+        }
+    } catch (error) {
+        console.error('Error sending OTP:', error);
+        return false;
+    }
+};
+
+module.exports = sendOtp;
+
+
+=== src/modules/utils/emailService.js ===
+const nodemailer = require('nodemailer');
+require('dotenv').config();
+
+// Create reusable transporter object using the default SMTP transport
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL,
+        pass: process.env.EMAIL_PASSWORD
+    }
+});
+
+exports.sendOrderConfirmationEmail = async (customerEmail, orderDetails) => {
+    const mailOptions = {
+        from: process.env.EMAIL,
+        to: customerEmail,
+        subject: 'Order Confirmation',
+        text: `Your order has been placed successfully. Order details: ${JSON.stringify(orderDetails)}`
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('Order confirmation email sent to customer');
+    } catch (error) {
+        console.error('Error sending order confirmation email to customer:', error);
+        throw error;
+    }
+};
+
+exports.sendNewOrderNotificationEmail = async (vendorEmail, orderDetails, customerContactNumber) => {
+    const mailOptions = {
+        from: process.env.EMAIL,
+        to: vendorEmail,
+        subject: 'New Order Placed',
+        html: `
+            <p>Hello,</p>
+            <p>A new order has been placed. Here are the details:</p>
+            <ul>
+                <li><strong>Order ID:</strong> ${orderDetails.orderId}</li>
+                <li><strong>Customer:</strong> ${orderDetails.name}</li>
+                <li><strong>Customer Number:</strong> ${customerContactNumber}</li>
+                <li><strong>Shipping Address:</strong> <br>
+                    ${orderDetails.shippingAddress.address}<br>
+                    ${orderDetails.shippingAddress.city}, ${orderDetails.shippingAddress.state}, ${orderDetails.shippingAddress.country}<br>
+                    Postal Code: ${orderDetails.shippingAddress.postalCode}
+                </li>
+                <li><strong>Order Date:</strong> ${new Date(orderDetails.createdAt).toLocaleString()}</li>
+            </ul>
+            <p><strong>Products:</strong></p>
+            <table style="width: 100%; border-collapse: collapse; border: 1px solid #ccc;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="border: 1px solid #ccc; padding: 8px;">Product</th>
+                        <th style="border: 1px solid #ccc; padding: 8px;">Price</th>
+                        <th style="border: 1px solid #ccc; padding: 8px;">Quantity</th>
+                        <th style="border: 1px solid #ccc; padding: 8px;">Total Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${orderDetails.vendors.map(vendor => `
+                        <tr>
+                            <td style="border: 1px solid #ccc; padding: 8px;">
+                                ${vendor.products.map(product => `
+                                    <p><strong>${product.quantity}x ${product.name}</strong></p>
+                                    <p><em>Attributes:</em> ${product.variations.map(variation => `
+                                        ${variation.attributes.selected}: ${variation.attributes.value}
+                                    `).join(', ')}</p>
+                                `).join('')}
+                            </td>
+                            <td style="border: 1px solid #ccc; padding: 8px;">₹${vendor.products.reduce((sum, product) => sum + product.totalAmount, 0).toFixed(2)}</td>
+                            <td style="border: 1px solid #ccc; padding: 8px;">${vendor.products.reduce((sum, product) => sum + product.quantity, 0)}</td>
+                            <td style="border: 1px solid #ccc; padding: 8px;">₹${vendor.products.reduce((sum, product) => sum + product.totalAmount, 0).toFixed(2)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            <br>
+            <p>Please process the order at your earliest convenience.</p>
+            <br>
+            <p>Thank you.</p>
+        `
+    };
+
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('New order notification email sent to vendor');
+    } catch (error) {
+        console.error('Error sending new order notification email to vendor:', error);
+        throw error;
+    }
+};
+
+exports.sendNewChatOrderNotificationEmail = async (vendorEmail, orderDetails, customerDetails) => {
+    const rupeeSymbol = '\u20B9';
+    console.log("vendorEmail-->>", vendorEmail)
+    const mailOptions = {
+        from: process.env.EMAIL,
+        to: vendorEmail,
+        subject: 'New Order Placed',
+        html: `
+            <p>Hello,</p>
+            <p>A new order has been placed. Here are the details:</p>
+            <ul>
+                <li><strong>Order ID:</strong> ${orderDetails.orderId}</li>
+                <li><strong>Customer:</strong> ${customerDetails.name}</li>
+                <li><strong>Phone:</strong> ${customerDetails.contactNumber}</li>
+                <li><strong>Shipping Address:</strong> <br>
+                    ${orderDetails.shippingAddress.address}<br>
+                    ${orderDetails.shippingAddress.city}, ${orderDetails.shippingAddress.state}, ${orderDetails.shippingAddress.country}<br>
+                    Postal Code: ${orderDetails.shippingAddress.postalCode}
+                </li>
+                <li><strong>Order Date:</strong> ${new Date(orderDetails.createdAt).toLocaleString()}</li>
+            </ul>
+            <p><strong>Products:</strong></p>
+            <table style="width: 100%; border-collapse: collapse; border: 1px solid #ccc;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="border: 1px solid #ccc; padding: 8px;">Order Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <tr>
+                <td>${orderDetails.orderMessage}</td>
+            </tr>
+                </tbody>
+            </table>
+            <br>
+            <p>Please process the order at your earliest convenience.</p>
+            <br>
+            <p>Thank you.</p>
+        `
+    };
+
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('New order notification email sent to vendor');
+    } catch (error) {
+        console.error('Error sending new order notification email to vendor:', error);
+        throw error;
+    }
+};
+
+exports.sendNewChatOrderPaymentNotificationEmail = async (customerEmail, orderDetails, customerDetails) => {
+    const rupeeSymbol = '\u20B9';
+    console.log("customerEmail-->>", customerEmail)
+    const mailOptions = {
+        from: process.env.EMAIL,
+        to: customerEmail,
+        subject: 'New Order Placed',
+        html: `
+            <p>Hello,</p>
+            <p>A new order has been placed. Here are the details:</p>
+            <ul>
+                <li><strong>Order ID:</strong> ${orderDetails.orderId}</li>
+                <li><strong>Customer:</strong> ${customerDetails.name}</li>
+                <li><strong>Phone:</strong> ${customerDetails.contactNumber}</li>
+                <li><strong>Shipping Address:</strong> <br>
+                    ${orderDetails.shippingAddress.address}<br>
+                    ${orderDetails.shippingAddress.city}, ${orderDetails.shippingAddress.state}, ${orderDetails.shippingAddress.country}<br>
+                    Postal Code: ${orderDetails.shippingAddress.postalCode}
+                </li>
+                <li><strong>Order Date:</strong> ${new Date(orderDetails.createdAt).toLocaleString()}</li>
+            </ul>
+            <p><strong>Products:</strong></p>
+            <table style="width: 100%; border-collapse: collapse; border: 1px solid #ccc;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="border: 1px solid #ccc; padding: 8px;">Order Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <tr>
+                <td>${orderDetails.orderMessage}</td>
+            </tr>
+                </tbody>
+            </table>
+            <br>
+            <p>Please process the order at your earliest convenience.</p>
+            <br>
+            <p>Thank you.</p>
+        `
+    };
+
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('New order notification email sent to vendor');
+    } catch (error) {
+        console.error('Error sending new order notification email to vendor:', error);
+        throw error;
+    }
+};
+
+
+=== src/modules/Product/route.js ===
+const express = require("express");
+const router = express.Router();
+const upload = require("../Middleware/uploadHandler"); // Adjust the path as necessary
+const productController = require("./controller"); // Adjust the path as necessary
+
+// Route to add a new product with file upload middleware
+router.post(
+  "/products",
+  upload("uploads/products"),
+  productController.addProduct
+);
+router.put(
+  "/products/:id",
+  upload("uploads/products"),
+  productController.updateProduct
+);
+router.delete("/products/:id", productController.deleteProduct);
+router.get("/products/:vendorId", productController.getAllProductsVendor);
+router.get("/get-all-products/", productController.getAllProducts);
+router.get(
+  "/products-low-quantity/:vendorId",
+  productController.getProductsLowQuantity
+);
+
+router.get("/single-product/:id", productController.getProductById);
+
+router.get(
+  "/categories/:id/products",
+  productController.getProductsByCategoryId
+);
+router.get("/products/:id/similar", productController.getSimilarProducts);
+router.get(
+  "/recentlyAddedProducts",
+  productController.getRecentlyAddedProducts
+);
+router.get("/onDiscountProducts", productController.getDiscountedProducts);
+router.get("/searchProducts", productController.fuzzySearchProducts);
+router.put("/update-arrival-duration", productController.updateArrivalDuration);
+router.put(
+  "/products/:productId/variations/:variationId",
+  productController.updateVariationQuantity
+);
+router.patch(
+  "/products/:id/toggle-visibility",
+  productController.toggleVisibility
+);
+router.patch(
+  "/products/add-is-visible-field",
+  productController.addIsVisibleField
+);
+//get all category products
+router.get("/allCategoryProducts", productController.getallCategoryProducts);
+router.post("/makeActive", productController.makeActive);
+router.post("/makeInActive", productController.makeInActive);
+
+router.get("/search", productController.searchVendorProducts);
+
+module.exports = router;
+
+
+=== src/modules/Product/controller.js ===
+const Product = require("./model"); // Adjust the path as necessary
+const fs = require("fs");
+const path = require("path");
+const mongoose = require("mongoose");
+const Category = require("../Category/model");
+
+// Controller function to add a new product
+exports.addProduct = async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      category,
+      vendor,
+      availableLocalities,
+      tags,
+      isReturnAllowed,
+    } = req.body;
+    const images = req.files
+      .filter((file) => file.fieldname.startsWith("productImage"))
+      .map((file) => file.path);
+    const variationImages = req.files.filter((file) =>
+      file.fieldname.startsWith("variationImage")
+    );
+
+    const variations = JSON.parse(req.body.variations);
+
+    if (!variations || variations.length === 0) {
+      return res.status(400).json({
+        message: "At least one variation is required",
+      });
+    }
+
+    // Create new product instance first
+    const newProduct = new Product({
+      name,
+      images,
+      description,
+      category,
+      vendor,
+      availableLocalities,
+      tags,
+      isReturnAllowed,
+    });
+
+    const variationReferences = {};
+    const childQuantities = {};
+
+    // Process and format variations
+    const formattedVariations = variations.map((variation, index) => {
+      const formattedVariation = {
+        attributes: variation.attributes,
+        price: variation.price ? parseInt(variation.price) : 0, // Convert price to integer
+        discount: variation.discount ? parseInt(variation.discount) : 0, // Convert discount to integer
+        quantity: variation.quantity ? parseInt(variation.quantity) : 0, // Convert quantity to integer
+        images: variationImages
+          .filter((file) => file.fieldname.includes(`variationImage_${index}`))
+          .map((file) => file.path), // Assign the corresponding images
+        parentVariation: null, // Initialize parentVariation as null,
+      };
+
+      if (
+        variation.parentVariation !== null &&
+        variation.parentVariation !== ""
+      ) {
+        const parentIndex = variation.parentVariation.match(/\d+/)[0];
+        if (variationReferences[parentIndex]) {
+          formattedVariation.parentVariation =
+            variationReferences[parentIndex]._id;
+          if (!childQuantities[parentIndex]) {
+            childQuantities[parentIndex] = 0;
+          }
+          childQuantities[parentIndex] += formattedVariation.quantity;
+        } else {
+          return res.status(400).json({
+            message: `Parent variation not found for: ${variation.parentVariation}`,
+          });
+        }
+      }
+
+      const createdVariation = newProduct.variations.create(formattedVariation);
+      variationReferences[index + 1] = createdVariation;
+
+      return createdVariation;
+    });
+
+    for (const parentIndex in childQuantities) {
+      if (
+        childQuantities[parentIndex] > variationReferences[parentIndex].quantity
+      ) {
+        return res.status(400).json({
+          message: `Sum of child quantities exceeds parent quantity for parent variation: ${parentIndex}`,
+        });
+      }
+    }
+
+    newProduct.variations = formattedVariations;
+    newProduct.price = formattedVariations[0].price;
+    newProduct.discount = formattedVariations[0].discount;
+    newProduct.quantity = variations.reduce(
+      (sum, variation) => sum + parseInt(variation.quantity),
+      0
+    );
+
+    const savedProduct = await newProduct.save();
+
+    res.status(201).json({
+      message: "Product created successfully",
+      product: savedProduct,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to create product",
+      error: error.message,
+    });
+  }
+};
+
+// Controller function to update an existing product
+exports.updateProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      price,
+      discount,
+      description,
+      category,
+      vendor,
+      availableLocalities,
+      tags,
+      isReturnAllowed,
+      variations,
+      existingImages,
+      existingVariationImages,
+    } = req.body;
+
+    console.log("tags-->>", tags);
+
+    // Find the product by ID
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    // Delete product images from the file system that are not in existingImages
+    product.images.forEach((imagePath) => {
+      if (!existingImages?.includes(imagePath)) {
+        const fullPath = path.join(imagePath); // Adjust the path accordingly
+        fs.unlink(fullPath, (err) => {
+          if (err) {
+            console.error(`Failed to delete image file: ${fullPath}`, err);
+          }
+        });
+      }
+    });
+
+    // Parse and process the variations array
+    const parsedVariations = JSON.parse(variations);
+    const variationMap = {}; // To store parent variations by their attributes
+
+    // First, add all parent variations to the map, generating IDs if they do not exist
+    parsedVariations.forEach((variation) => {
+      if (variation.parentVariation === null) {
+        const key = `${variation.attributes.selected}:${variation.attributes.value}`;
+        variation._id = variation._id
+          ? new mongoose.Types.ObjectId(variation._id)
+          : new mongoose.Types.ObjectId();
+        variationMap[key] = variation._id;
+      }
+    });
+
+    // Validate and structure the variations array
+    const formattedVariations = parsedVariations.map((variation) => {
+      let parentVariationId = null;
+      if (
+        variation.parentVariation &&
+        !mongoose.Types.ObjectId.isValid(variation.parentVariation)
+      ) {
+        const parentAttr = variation.parentVariation.split(" - ");
+        if (parentAttr.length === 2) {
+          const parentAttr1 = parentAttr[1].split(": ");
+          const key = `${parentAttr1[0]}:${parentAttr1[1]}`;
+          parentVariationId = variationMap[key];
+        }
+      } else {
+        parentVariationId = variation.parentVariation
+          ? new mongoose.Types.ObjectId(variation.parentVariation)
+          : null;
+      }
+
+      return {
+        attributes: variation.attributes,
+        price: variation.price ? parseInt(variation.price) : 0,
+        discount: variation.discount ? parseInt(variation.discount) : 0,
+        quantity: variation.quantity ? parseInt(variation.quantity) : 0,
+        parentVariation: parentVariationId
+          ? new mongoose.Types.ObjectId(parentVariationId)
+          : null,
+        _id: variation._id
+          ? new mongoose.Types.ObjectId(variation._id)
+          : new mongoose.Types.ObjectId(),
+        images: [],
+      };
+    });
+
+    // Calculate total quantity and validate child quantities
+    const parentQuantities = {};
+    formattedVariations.forEach((variation) => {
+      if (variation.parentVariation) {
+        const parentId = variation.parentVariation.toString();
+        if (!parentQuantities[parentId]) {
+          parentQuantities[parentId] = 0;
+        }
+        parentQuantities[parentId] += variation.quantity;
+      }
+    });
+
+    // Check if any child quantities exceed their parent quantities
+    for (const [parentId, totalChildQuantity] of Object.entries(
+      parentQuantities
+    )) {
+      const parentVariation = formattedVariations.find(
+        (variation) => variation._id.toString() === parentId
+      );
+      if (parentVariation && totalChildQuantity > parentVariation.quantity) {
+        return res.status(400).json({
+          message: `Total quantity of child variations (${totalChildQuantity}) exceeds parent variation quantity (${parentVariation.quantity}) for parent variation ID: ${parentId}`,
+        });
+      }
+    }
+
+    // Calculate total quantity for the product
+    const totalQuantity = formattedVariations.reduce((sum, variation) => {
+      if (variation.parentVariation === null) {
+        return sum + variation.quantity;
+      }
+      return sum;
+    }, 0);
+
+    // Update the product details
+    product.name = name || product.name;
+    product.price = price ? parseInt(price) || formattedVariations[0].price : 0;
+    product.discount = parseInt(discount) || formattedVariations[0].discount;
+    product.description = description || product.description;
+    product.category = category || product.category;
+    product.vendor = vendor || product.vendor;
+    product.availableLocalities =
+      availableLocalities || product.availableLocalities;
+    (product.tags = tags ? tags : []),
+      (product.isReturnAllowed = isReturnAllowed || product.isReturnAllowed);
+    product.quantity = totalQuantity;
+
+    console.log("req.files-->>", req.files);
+
+    // Handle new product images and variation images
+    if (req.files && req.files.length > 0) {
+      const newImages = req.files
+        .filter((file) => file.fieldname.startsWith("productImage"))
+        .map((file) => file.path);
+      product.images = existingImages
+        ? existingImages.concat(newImages)
+        : newImages;
+
+      req.files.forEach((file) => {
+        if (file.fieldname.startsWith("variationImage_")) {
+          const [variationIndex, imageIndex] = file.fieldname
+            .split("_")
+            .slice(1)
+            .map(Number);
+          if (formattedVariations[variationIndex]) {
+            formattedVariations[variationIndex].images[imageIndex] = file.path;
+          }
+        }
+      });
+    } else {
+      product.images = existingImages || product.images;
+    }
+
+    // Handle existing variation images
+    if (existingVariationImages) {
+      existingVariationImages.forEach((imageList, variationIndex) => {
+        if (formattedVariations[variationIndex]) {
+          imageList.forEach((image, imageIndex) => {
+            formattedVariations[variationIndex].images[imageIndex] = image;
+          });
+        }
+      });
+    }
+
+    // Update variations
+    product.variations = formattedVariations;
+
+    // Save the updated product to the database
+    const updatedProduct = await product.save();
+
+    // Send response
+    res.status(200).json({
+      message: "Product updated successfully",
+      product: updatedProduct,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to update product",
+      error: error.message,
+    });
+  }
+};
+
+// Controller function to get all products
+exports.getAllProductsVendor = async (req, res) => {
+  try {
+    const vendorId = req.params.vendorId;
+
+    // Find all products, populate the category field, and sort by creation date (latest to oldest)
+    const products = await Product.find({ vendor: vendorId })
+      .populate("category")
+      .sort({ createdAt: -1 });
+
+    // Send response with the products
+    res.status(200).json({
+      message: "Products retrieved successfully",
+      products,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to retrieve products",
+      error: error.message,
+    });
+  }
+};
+
+// Controller to get products with low quantity
+exports.getProductsLowQuantity = async (req, res) => {
+  try {
+    const vendorId = req.params.vendorId; // Extract vendorId from request params
+
+    // Find products for the specified vendor
+    const products = await Product.find({ vendor: vendorId }).lean();
+
+    // Filter products where parent variation quantity is less than 10
+    const lowQuantityProducts = products.filter((product) => {
+      return product.variations.some(
+        (variation) => !variation.parentVariation && variation.quantity < 10
+      );
+    });
+
+    // Include child variations for filtered products
+    const result = lowQuantityProducts.map((product) => {
+      const parentVariations = product.variations.filter(
+        (variation) => !variation.parentVariation && variation.quantity < 10
+      );
+      const childVariations = product.variations.filter((variation) =>
+        parentVariations.some((parent) =>
+          parent._id.equals(variation.parentVariation)
+        )
+      );
+      return {
+        ...product,
+        variations: [...parentVariations, ...childVariations],
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("Error fetching low quantity products:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+// Controller function to get a product by ID
+exports.getProductById = async (req, res) => {
+  // console.log("getProductById->>", req.params.id)
+
+  try {
+    const { id } = req.params;
+
+    // Find the product by ID and populate the category field
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    // Send the product in the response
+    res.status(200).json({
+      message: "Product retrieved successfully",
+      product,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to retrieve product",
+      error: error.message,
+    });
+  }
+};
+
+// Controller function to delete a product by ID
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the product by ID
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    // Delete product images from the file system
+    product.images.forEach((imagePath) => {
+      const fullPath = path.join(imagePath);
+      fs.unlink(fullPath, (err) => {
+        if (err) {
+          console.error(`Failed to delete image file: ${fullPath}`, err);
+        }
+      });
+    });
+
+    // Delete the product from the database
+    const deletedProduct = await Product.findByIdAndDelete(id);
+
+    // Send response confirming deletion
+    res.status(200).json({
+      message: "Product deleted successfully",
+      product: deletedProduct,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to delete product",
+      error: error.message,
+    });
+  }
+};
+
+// Shuffle the products array
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+// Controller function to get products by Category ID with pagination
+exports.getProductsByCategoryId = async (req, res) => {
+  try {
+    const categoryId = req.params.id; // Assuming 'id' is the category ID
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const userLocation = req.query.userLocation;
+
+    console.log("userLocation", userLocation);
+
+    // Define the match criteria for products
+    const matchCriteria = {
+      category: new mongoose.Types.ObjectId(categoryId),
+      availableLocalities: { $in: [userLocation, "all"] },
+      quantity: { $gt: 0 }, // Ensure quantity is greater than 0
+      isVisible: true,
+    };
+
+    // Perform the aggregation query
+    const products = await Product.aggregate([
+      { $match: matchCriteria },
+      { $skip: (page - 1) * limit }, // Skip documents for pagination
+      { $limit: limit }, // Limit the number of documents returned
+    ]);
+
+    shuffle(products);
+
+    // Count the total number of products in the category with the specified location filter
+    const totalProducts = await Product.countDocuments(matchCriteria);
+
+    console.log("totalProducts page", products.length, page);
+
+    // Send the products in the response with pagination metadata
+    res.status(200).json({
+      total: totalProducts,
+      page,
+      limit,
+      products,
+    });
+  } catch (error) {
+    console.error("Error retrieving products:", error);
+    res.status(500).json({
+      message: "Failed to retrieve products",
+      error: error.message,
+    });
+  }
+};
+// Get similar products based on the same category
+exports.getSimilarProducts = async (req, res) => {
+  try {
+    console.log("api call");
+    const productId = req.params.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const userLocation = req.query.userLocation;
+
+    // Find the product by ID
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Find other products in the same category, excluding the current product
+    const similarProducts = await Product.find({
+      category: product.category,
+      availableLocalities: { $in: [userLocation, "all"] },
+      quantity: { $gt: 0 },
+      isVisible: true,
+      _id: { $ne: productId },
+    })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    const totalSimilarProducts = await Product.countDocuments({
+      category: product.category,
+      availableLocalities: { $in: [userLocation, "all"] },
+      quantity: { $gt: 0 },
+      _id: { $ne: productId },
+    });
+
+    res.json({
+      total: totalSimilarProducts,
+      page,
+      limit,
+      products: similarProducts,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+//Recently added Products
+exports.getRecentlyAddedProducts = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const userLocation = req.query.userLocation;
+
+    // Construct the filter for availableLocalities
+    const locationFilter = userLocation
+      ? {
+          availableLocalities: { $in: [userLocation, "all"] },
+          quantity: { $gt: 0 },
+          isVisible: true,
+        }
+      : { quantity: { $gt: 0 }, isVisible: true };
+
+    // Find the most recently added products with the location filter
+    const recentlyAddedProducts = await Product.find(locationFilter)
+      .sort({ createdAt: -1 }) // Sort by creation date in descending order
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    // Count the total number of products with the location filter
+    const totalRecentlyAddedProducts = await Product.countDocuments(
+      locationFilter
+    );
+
+    res.json({
+      total: totalRecentlyAddedProducts,
+      page,
+      limit,
+      products: recentlyAddedProducts,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+//On-discount Products
+exports.getDiscountedProducts = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const userLocation = req.query.userLocation;
+
+    // Construct the filter for availableLocalities
+    const locationFilter = userLocation
+      ? {
+          availableLocalities: { $in: [userLocation, "all"] },
+          quantity: { $gt: 0 },
+          isVisible: true,
+        }
+      : { quantity: { $gt: 0 }, isVisible: true };
+
+    // Combine the discount filter with the location filter
+    const query = {
+      discount: { $gt: 0 },
+      ...locationFilter,
+    };
+
+    // Find products that have a discount greater than 0 and match the location filter
+    const discountedProducts = await Product.find(query)
+      .sort({ discount: -1 }) // Optionally, sort by the highest discount first
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    const totalDiscountedProducts = await Product.countDocuments(query);
+
+    res.json({
+      total: totalDiscountedProducts,
+      page,
+      limit,
+      products: discountedProducts,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+//Fuzzy Search
+// controller.js
+exports.fuzzySearchProducts = async (req, res) => {
+  const { searchQuery, page = 1, limit = 10, userLocation } = req.query;
+
+  try {
+    // Build the regex query for partial matches
+    const regexQuery = new RegExp(searchQuery, "i"); // 'i' for case-insensitive
+
+    // Construct the filter for availableLocalities
+    const locationFilter = userLocation
+      ? {
+          availableLocalities: { $in: [userLocation, "all"] },
+          quantity: { $gt: 0 },
+          isVisible: true,
+        }
+      : { quantity: { $gt: 0 }, isVisible: true };
+
+    // Combine the search query with the location filter
+    const query = {
+      ...locationFilter,
+      $or: [
+        { name: { $regex: regexQuery } },
+        { description: { $regex: regexQuery } },
+        { tags: { $regex: regexQuery } }, // Include tags in the search
+      ],
+    };
+
+    // Find products that match the search query in the 'name', 'description' or 'tags', and match the location filter
+    const results = await Product.find(query)
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    const totalResults = await Product.countDocuments(query);
+
+    res.json({
+      total: totalResults,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      products: results,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateArrivalDuration = async (req, res) => {
+  try {
+    // Fetch all products that do not have the arrivalDuration field set
+    const products = await Product.find({
+      $or: [{ arrivalDuration: { $exists: false } }, { arrivalDuration: null }],
+    });
+
+    // Update each product based on the custom pre-validate logic
+    const updatePromises = products.map(async (product) => {
+      const containsNumber = product.availableLocalities.some((loc) =>
+        /\d/.test(loc)
+      );
+      const containsAll = product.availableLocalities.includes("all");
+
+      if (containsAll && !containsNumber) {
+        product.arrivalDuration = "4 Days";
+      } else if (containsNumber) {
+        product.arrivalDuration = "90 Min";
+      }
+
+      return product.save();
+    });
+
+    // Wait for all updates to complete
+    await Promise.all(updatePromises);
+
+    res.status(200).json({
+      message: "Arrival duration updated for all applicable products.",
+    });
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .json({ error: "An error occurred while updating arrival duration." });
+  }
+};
+
+exports.updateVariationQuantity = async (req, res) => {
+  try {
+    const { productId, variationId } = req.params;
+    const { quantity } = req.body;
+
+    // Find the product by ID
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    // Find the variation by ID within the product's variations array
+    const variation = product.variations.id(variationId);
+
+    if (!variation) {
+      return res.status(404).json({
+        message: "Variation not found",
+      });
+    }
+
+    // Find the parent variation if exists
+    const parentVariation = variation.parentVariation
+      ? product.variations.id(variation.parentVariation)
+      : null;
+
+    // If the variation has a parent, check if the total quantity of all child variations exceeds the parent's quantity
+    if (parentVariation) {
+      // Update the quantity of the found variation
+      variation.quantity = quantity;
+
+      // Find all child variations of the parent variation
+      const childVariations = product.variations.filter(
+        (v) =>
+          v.parentVariation && v.parentVariation.equals(parentVariation._id)
+      );
+
+      // Calculate the total quantity of all child variations including the current variation
+      const totalChildQuantity = childVariations.reduce(
+        (sum, v) => sum + v.quantity,
+        0
+      );
+
+      if (totalChildQuantity > parentVariation.quantity) {
+        return res.status(400).json({
+          message:
+            "Total quantity of child variations cannot exceed parent variation quantity",
+        });
+      }
+    } else {
+      // Update the quantity of the variation if it's a parent variation
+      variation.quantity = quantity;
+    }
+
+    // Recalculate the root level quantity field
+    const totalQuantity = product.variations.reduce(
+      (sum, v) => (v.parentVariation === null ? sum + v.quantity : sum),
+      0
+    );
+
+    product.quantity = totalQuantity;
+
+    // Save the updated product to the database
+    const updatedProduct = await product.save();
+
+    // Send response
+    res.status(200).json({
+      message: "Variation quantity updated successfully",
+      product: updatedProduct,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to update variation quantity",
+      error: error.message,
+    });
+  }
+};
+
+exports.toggleVisibility = async (req, res) => {
+  try {
+    const productId = req.params.id; // Get the product ID from the request parameters
+
+    // Find the product by its ID
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Toggle the 'isVisible' field
+    product.isVisible = !product.isVisible;
+
+    // Save the updated product
+    await product.save();
+
+    res.status(200).json({
+      message: "Product visibility toggled successfully",
+      product,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.addIsVisibleField = async (req, res) => {
+  console.log("addIsVisibleField--->>>");
+  try {
+    // Update all products to add the 'isVisible' field with a default value (e.g., true)
+    const result = await Product.updateMany(
+      { isVisible: { $exists: false } }, // Only update documents that don't have 'isVisible'
+      { $set: { isVisible: true } } // Set 'isVisible' to true
+    );
+
+    res.status(200).json({
+      message: "Successfully added the `isVisible` field to all products.",
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+exports.getAllProducts = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const userLocation = req.query.userLocation;
+
+    // Construct the filter for availableLocalities
+    const locationFilter = userLocation
+      ? {
+          availableLocalities: { $in: [userLocation, "all"] },
+          quantity: { $gt: 0 },
+          isVisible: true,
+        }
+      : { quantity: { $gt: 0 }, isVisible: true };
+
+    // Find the most recently added products with the location filter
+    const products = await Product.find(locationFilter)
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    // Count the total number of products with the location filter
+    const totalProducts = await Product.countDocuments(locationFilter);
+
+    res.json({
+      total: totalProducts,
+      page,
+      limit,
+      products,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+exports.getallCategoryProducts = async (req, res) => {
+  try {
+    // Fetch all categories
+    const categories = await Category.find();
+
+    const userLocation = req.query.userLocation;
+
+    // Prepare the result array
+    const result = await Promise.all(
+      categories.map(async (category) => {
+        // Fetch a maximum of 4 products for each category
+        const products = await Product.find({
+          availableLocalities: { $in: [userLocation, "all"] },
+          category: category._id,
+          isVisible: true,
+        }).limit(4);
+
+        // Return an object containing the category ID, name, and its products
+        return {
+          categoryId: category._id,
+          categoryName: category.name,
+          products: products,
+        };
+      })
+    );
+
+    // Send the result as the response
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching category products:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch category products", error });
+  }
+};
+
+exports.makeActive = async (req, res) => {
+  try {
+    // Expecting the number of products to activate per category in the request body.
+    const count = parseInt(req.body.count, 10);
+    console.log("count==>>", count);
+    if (!count || count <= 0) {
+      return res.status(400).json({
+        message:
+          "Please provide a valid positive number for products to activate per category.",
+      });
+    }
+
+    // Get all distinct categories from the Product collection.
+    const categories = await Product.distinct("category");
+
+    let totalUpdated = 0;
+
+    // For each category, update up to `count` products to active (isVisible: true).
+    for (const category of categories) {
+      // Find up to `count` products in this category that are not active.
+      const productsToUpdate = await Product.find({
+        category,
+        isVisible: false,
+      })
+        .limit(count)
+        .select("_id");
+
+      if (productsToUpdate.length > 0) {
+        const productIds = productsToUpdate.map((prod) => prod._id);
+        const result = await Product.updateMany(
+          { _id: { $in: productIds } },
+          { isVisible: true }
+        );
+        // Depending on your mongoose version, the number of modified docs may be in modifiedCount or nModified.
+        totalUpdated += result.modifiedCount || result.nModified || 0;
+      }
+    }
+
+    res.status(200).json({
+      message: `Activated ${totalUpdated} products across ${categories.length} categories.`,
+    });
+  } catch (error) {
+    console.error("Error making products active:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+exports.makeInActive = async (req, res) => {
+  try {
+    await Product.updateMany({}, { isVisible: false });
+    res.status(200).json({ message: "All products are now inactive." });
+  } catch (error) {
+    console.error("Error making products inactive:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+};
+
+//Dukaan Details Page → Search Products
+
+// GET /products/search?vendorId=...&q=...
+exports.searchVendorProducts = async (req, res) => {
+  try {
+    const { vendorId, q } = req.query;
+    const products = await Product.find({
+      vendor: vendorId,
+      name: new RegExp(q, "i"),
+    });
+
+    res.status(200).json(products);
+  } catch (error) {
+    res.status(500).json({ message: "Error searching vendor products", error });
+  }
+};
+
+
+=== src/modules/Product/model.js ===
+const mongoose = require('mongoose');
+
+// Define the Variation Schema
+const variationSchema = new mongoose.Schema({
+    attributes: {
+        type: Map,
+        of: String,
+        required: true
+    },
+    price: {
+        type: Number,
+        required: true,
+        default: 0,
+        min: 0
+    },
+    discount: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
+    quantity: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    images: {
+        type: [String], // Assuming images are stored as URLs or paths
+        default: [] // Initialize with an empty array
+    },
+    parentVariation: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product.variations',
+        default: null
+    }
+});
+
+// Define the Product Schema
+const productSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    tags: [{
+        type: String,
+        required: true
+    }],
+    isReturnAllowed: {
+        type: Boolean,
+        required: true
+    },
+    isVisible: {
+        type: Boolean,
+        default: true,
+        required: true
+    },
+    images: {
+        type: [String],
+        validate: [arrayLimit, '{PATH} exceeds the limit of 10']
+    },
+    variations: [variationSchema],
+    description: {
+        type: String,
+        trim: true
+    },
+    category: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Category',
+        required: true
+    },
+    vendor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Vendor',
+        required: true
+    },
+    price: {
+        type: Number,
+        required: true,
+        min: 0
+    },
+    discount: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
+    quantity: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    availableLocalities: [{
+        type: String,
+        required: true
+    }],
+   arrivalDuration:{
+    type: String,
+   }
+}, {
+    timestamps: true
+});
+
+// Custom validator to limit array size
+function arrayLimit(val) {
+    return val.length <= 10;
+}
+
+productSchema.pre('validate', async function (next) {
+    const product = this;
+
+    const containsNumber = product.availableLocalities.some(loc => /\d/.test(loc));
+    const containsAll = product.availableLocalities.includes('all');
+
+    if (containsAll && !containsNumber) {
+        product.arrivalDuration = '4 Days'
+    } else if (containsNumber) {
+        product.arrivalDuration = '90 Min'
+    }
+
+    next();
+});
+
+
+
+// Create the Product Model
+const Product = mongoose.model('Product', productSchema);
+
+// Export the Product Model
+module.exports = Product;
+
+
+=== src/modules/Contactus/route.js ===
+const express = require('express');
+const router = express.Router();
+const contactController = require('./controller');
+const authenticateToken = require('../Middleware/authMiddleware');
+const authorizeAdmin = require('../Middleware/authorizeMiddleware');
+
+// Routes for user
+router.post('/contact',authenticateToken,authorizeAdmin, contactController.createContact);
+router.get('/get-contact', contactController.getContact);
+
+module.exports = router;
+
+
+=== src/modules/Contactus/controller.js ===
+const Contact = require('./model');
+
+// Create a new contact
+exports.createContact = async (req, res) => {
+    try {
+        const { phone, email, instagramId, twitterId, facebookId } = req.body;
+
+        // Check if there's an existing contact document
+        const existingContact = await Contact.findOne();
+
+        if (existingContact) {
+            // Update the existing document
+            existingContact.phone = phone;
+            existingContact.email = email;
+            existingContact.instagramId = instagramId;
+            existingContact.twitterId = twitterId;
+            existingContact.facebookId = facebookId;
+
+            const updatedContact = await existingContact.save();
+            res.status(200).json(updatedContact);
+        } else {
+            // Create a new document
+            const newContact = new Contact({
+                phone,
+                email,
+                instagramId,
+                twitterId,
+                facebookId
+            });
+
+            const savedContact = await newContact.save();
+            res.status(200).json(savedContact);
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+exports.getContact = async (req, res) => {
+    try {
+        // Find the first document in the Contact collection
+        const contact = await Contact.findOne();
+
+        if (!contact) {
+            return res.status(404).json({ message: 'Contact not found' });
+        }
+
+        res.status(200).json(contact);
+    } catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+
+=== src/modules/Contactus/model.js ===
+// model.js
+const mongoose = require('mongoose');
+const { Schema } = mongoose;
+
+const contactSchema = new Schema({
+  phone: {
+    type: String,
+    required: true
+  },
+  email: {
+    type: String,
+    required: true
+  },
+  instagramId: {
+    type: String,
+    required: false
+  },
+  twitterId: {
+    type: String,
+    required: false
+  },
+  facebookId: {
+    type: String,
+    required: false
+  }
+}, {
+  timestamps: true // This will add createdAt and updatedAt timestamps
+});
+
+const Contact = mongoose.model('Contact', contactSchema);
+
+module.exports = Contact;
+
+
+=== src/modules/Delivery/route.js ===
+const express = require('express');
+const router = express.Router();
+const deliveryController = require('./controller');
+const authenticateToken = require('../Middleware/authMiddleware');
+const authorizeAdmin = require('../Middleware/authorizeMiddleware');
+const handleUpload = require('../Middleware/uploadHandler');
+
+// Define the upload directory
+const uploadDir = 'uploads/delivery';
+
+// Route for delivery login
+router.post('/delivery/login/phone', deliveryController.deliveryLoginPhone);
+
+// Route to get a delivery by ID
+router.get('/delivery/:id', deliveryController.getDeliveryById);
+
+// Route to update a delivery by ID
+router.put('/single-delivery/:id',handleUpload(uploadDir), deliveryController.updateDelivery);
+
+router.post('/delivery/check-restricted', deliveryController.checkIfUserIsRestricted);
+
+
+router.put('/delivery/update-fcm/:id', deliveryController.updateFcm);
+
+
+module.exports = router;
+
+
+=== src/modules/Delivery/controller.js ===
+const Delivery = require('./model'); // Ensure the correct path to the delivery model
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+require('dotenv').config();
+const secret = process.env.JWT_SECRET;
+
+
+
+exports.deliveryLoginPhone = async (req, res) => {
+    const { phoneNumber } = req.body;
+
+    try {
+        if (!phoneNumber) {
+            return res.status(400).send({ error: 'All fields are required' });
+        }
+
+        let delivery;
+
+        const existingDelivery = await Delivery.findOne({ contactNumber: phoneNumber });
+        delivery = existingDelivery;
+
+        if (!existingDelivery) {
+            // Create a new delivery with the contact number
+            const newDelivery = new Delivery({
+                contactNumber: phoneNumber,
+                role: "delivery",
+            });
+
+            await newDelivery.save();
+            delivery = newDelivery;
+        }
+
+        // Generate a token
+        const token = jwt.sign({ id: delivery._id, role: delivery.role }, secret);
+
+        res.status(200).json({ message: 'Login successful', delivery, token });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+
+// Controller function to get a delivery by ID
+exports.getDeliveryById = async (req, res) => {
+    try {
+        const delivery = await Delivery.findById(req.params.id);
+        if (!delivery) {
+            return res.status(404).send();
+        }
+        res.status(200).send(delivery);
+    } catch (error) {
+        res.status(500).send(error);
+    }
+};
+
+
+exports.updateDelivery = async (req, res) => {
+    try {
+        // Extract delivery ID from route parameters
+        const deliveryId = req.params.id;
+
+        console.log("deliveryId--->>", deliveryId)
+
+        // Extract new delivery details from request body
+        const updatedData = req.body;
+
+
+        // Handle file uploads if any
+        if (req.files && req.files.length > 0) {
+            const filePaths = req.files.map(file => file.path);
+            updatedData.image = filePaths[0]; // Assuming one image per delivery, adjust as needed
+        }
+
+        // Find the delivery by ID and update their details
+        const updatedDelivery = await Delivery.findByIdAndUpdate(
+            deliveryId,
+            updatedData,
+            { new: true, runValidators: true }
+        );
+
+        console.log("updatedDelivery", updatedDelivery)
+
+
+        // Check if delivery was found and updated
+        if (!updatedDelivery) {
+            return res.status(404).json({ message: 'Delivery not found' });
+        }
+
+        // Respond with the updated delivery details
+        res.status(200).json(updatedDelivery);
+    } catch (error) {
+        // Handle errors and send error response
+        console.error('Error updating delivery:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+
+exports.checkIfUserIsRestricted = async (req, res) => {
+    try {
+        const { contactNumber } = req.body;
+
+        console.log("contactNumber-->>", contactNumber)
+
+        // Validate if at least one identifier is provided
+        if (!contactNumber) {
+            return res.status(400).json({ error: 'contact number is required' });
+        }
+
+        // Find the delivery by  or contact number
+        const delivery = await Delivery.findOne({ contactNumber });
+
+        console.log("delivery--->>", delivery)
+
+        // If delivery is not found, return an error
+        if (!delivery) {
+            return res.status(200).json({ error: 'User not found' });
+        }
+
+        // Check if the delivery is restricted
+        if (delivery.isRestricted) {
+            return res.status(403).json({ message: 'User is restricted' });
+        }
+
+        // If the user is not restricted
+        return res.status(200).json({ message: 'User is not restricted' });
+
+    } catch (error) {
+        // Handle any errors
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+
+exports.updateFcm = async (req, res) => {
+    console.log("it is called!!")
+    try {
+        // Extract delivery ID from route parameters
+        const deliveryId = req.params.id;
+
+        console.log("deliveryId--->>", deliveryId)
+
+        // Extract new delivery details from request body
+        const updatedData = req.body;
+
+        console.log("updatedData-->>", updatedData)
+
+        // Find the delivery by ID and update their details
+        const updatedDelivery = await Delivery.findByIdAndUpdate(
+            deliveryId,
+            updatedData,
+            { new: true, runValidators: true }
+        );
+
+        // Check if delivery was found and updated
+        if (!updatedDelivery) {
+            return res.status(404).json({ message: 'Delivery not found' });
+        }
+
+        // Respond with the updated delivery details
+        res.status(200).json(updatedDelivery);
+    } catch (error) {
+        // Handle errors and send error response
+        console.error('Error updating delivery:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+=== src/modules/Delivery/model.js ===
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+// Define the schema
+const deliverySchema = new Schema({
+  name: {
+    type: String,
+  },
+  image: {
+    type: String,
+  },
+  contactNumber: {
+    type: String,
+    required: true
+  },
+
+  role: {
+    type: String,
+    default: 'delivery man'
+  },
+  address: {
+    type: String,
+  },
+  vehicleDetails:{
+    type: String,
+  },
+
+  fcmDeviceToken: {
+    type: String,
+  },
+  isRestricted: {
+    type: Boolean,
+    default: false
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+
+// Create the model
+const Delivery = mongoose.model('Delivery', deliverySchema);
+
+module.exports = Delivery;
+//
+
+=== src/modules/ChatOrdrer/route.js ===
+const express = require('express');
+const router = express.Router();
+const {getChatOrder, updateChatOrder, markChatOrderViewed, getNewChatOrdersCountByVendor, updateChatPaymentStatusManually, createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, getChatOrdersHistoryByCustomer } = require('./controller'); // Adjust the path as necessary
+
+// POST route to create a new ChatOrder
+router.post('/create-chat-order', createChatOrder);
+
+// PUT route to update an existing ChatOrder
+router.put('/chat/updateChatOrder', updateChatOrder);
+
+
+// GET route to fetch a single ChatOrder
+router.get('/chat-order/:orderId', getChatOrder);
+
+// GET route to fetch all ChatOrders of a particular customer
+router.get('/customer/:customerId/chat-orders', getChatOrdersByCustomer);
+router.get('/chat-orders-history/:customerId/', getChatOrdersHistoryByCustomer);
+
+
+router.put('/chat-order/status/:orderId/vendor/', updateChatOrderStatus);
+
+router.get('/chat-order/vendor/:vendorId', getChatOrdersByVendor);
+
+router.put('/chat-order-status-amount', updateOrderAmountAndStatus);
+
+router.post('/chat-verify-payment', updateChatPaymentStatusManually);
+
+router.get('/new-chat-order/vendor/:vendorId', getNewChatOrdersCountByVendor);
+router.get('/mark-viewed/chat-orders/:vendorId', markChatOrderViewed);
+
+module.exports = router;
+
+
+=== src/modules/ChatOrdrer/controller.js ===
+const ChatOrder = require('./model'); // Adjust the path as necessary
+const Customer = require('../Customer/model'); // Assuming you have a Customer model
+const Vendor = require('../Vendor/model'); // Assuming you have a Customer model
+const mongoose = require('mongoose');
+const emailService = require('../utils/emailService');
+const { sendPushNotification } = require('../utils/pushNotificationUtil');
+
+// Function to create a new ChatOrder
+const createChatOrder = async (req, res) => {
+    console.log("api is hiiting")
+    try {
+        const { orderMessage, customer, name, shippingAddress, paymentStatus } = req.body;
+        // Validate required fields
+        if (!orderMessage || !customer || !shippingAddress || !shippingAddress.address || !shippingAddress.city || !shippingAddress.state || !shippingAddress.country || !shippingAddress.postalCode) {
+            return res.status(400).json({ message: 'Missing required fields' });
+        }
+
+        // Verify that the customer exists
+        const customerExists = await Customer.findById(customer);
+        if (!customerExists) {
+            return res.status(404).json({ message: 'Customer not found' });
+        }
+
+        // Create a new chat order
+        const newChatOrder = new ChatOrder({
+
+            orderMessage,
+            customer,
+            name,
+            shippingAddress,
+            paymentStatus,
+            is_new: true
+        });
+
+        // Save the order to the database
+        const savedOrder = await newChatOrder.save();
+
+        // console.log("savedOrder->", savedOrder)
+
+
+        // Fetch the vendor's role using the vendorId
+        const vendorDetails = await Vendor.findById(savedOrder.vendor)
+        const customerDetails = await Customer.findById(savedOrder.customer)
+
+        // console.log("vendorDetails->", vendorDetails)
+
+        await emailService.sendNewChatOrderNotificationEmail(vendorDetails.email, savedOrder, customerDetails);
+
+
+        return res.status(201).json({ message: 'ChatOrder created successfully', order: savedOrder });
+    } catch (error) {
+        console.error('Error creating chat order:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+const updateChatOrder = async (req, res) => {
+    try {
+        const { orderId, products } = req.body;
+
+        // Validate required fields
+        if (!orderId || !products || !Array.isArray(products) || products.length === 0) {
+            return res.status(400).json({ message: 'Missing required fields' });
+        }
+
+        // Find the order by orderId
+        const order = await ChatOrder.findOne({ _id: orderId });
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        // Update the products and calculate the total amount
+        order.products = products;
+        order.totalAmount = products.reduce((total, product) => {
+            // Calculate the subtotal for each product considering discounts
+            const subtotal = product.price * product.quantity * (1 - product.discount / 100);
+            // Add the subtotal to the running total
+            return total + subtotal;
+        }, 0);
+
+        // Round the totalAmount to two decimal places
+        order.totalAmount = parseFloat(order.totalAmount.toFixed(2));
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        if (products) {
+            // Extract customer ID from the order
+            const customerId = order.customer._id;
+            // Retrieve the customer from database to get FCM token
+            const customer = await Customer.findById(customerId);
+            if (!customer) {
+                return res.status(404).json({ error: 'Customer not found' });
+            }
+            const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
+            const title = 'Check Total Amount';
+            const body = `Your order: ${updatedOrder.orderMessage}. Total Amount : ₹${updatedOrder.totalAmount}.`;
+            try {
+                // Assuming you have a function or service to send push notifications
+                let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+                console.log("Push notification response:", pushNotificationRes);
+            } catch (error) {
+                console.error('Error sending push notification:', error);
+            }
+    
+        }
+
+        return res.status(200).json({ message: 'ChatOrder updated successfully', order: updatedOrder });
+    } catch (error) {
+        console.error('Error updating chat order:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+const getChatOrder = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        // Find the order by orderId
+        const order = await ChatOrder.findOne({ _id: orderId }).populate('customer').populate('vendor');
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        return res.status(200).json(order);
+    } catch (error) {
+        console.error('Error fetching chat order:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+
+
+
+
+
+
+// Function to get all ChatOrders of a particular customer
+const getChatOrdersByCustomer = async (req, res) => {
+    try {
+        const customerId = req.params.customerId;
+
+        // Verify that the customer exists
+        const customerExists = await Customer.findById(customerId);
+        if (!customerExists) {
+            return res.status(404).json({ message: 'Customer not found' });
+        }
+
+        // Find all chat orders for the specified customer, sorted by createdAt in descending order
+        const chatOrders = await ChatOrder.find({
+            customer: customerId,
+            orderStatus: { $nin: ['Delivered', 'Cancelled'] }
+        })
+        .populate('customer')
+        .sort({ createdAt: -1 });
+
+        return res.status(200).json(chatOrders);
+    } catch (error) {
+        console.error('Error fetching chat orders:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+const getChatOrdersHistoryByCustomer = async (req, res) => {
+    try {
+        const customerId = req.params.customerId;
+
+        // Verify that the customer exists
+        const customerExists = await Customer.findById(customerId);
+        if (!customerExists) {
+            return res.status(404).json({ message: 'Customer not found' });
+        }
+
+        // Find all chat orders for the specified customer, sorted by createdAt in descending order
+        const chatOrders = await ChatOrder.find({
+            customer: customerId,
+            orderStatus: { $in: ['Delivered', 'Cancelled'] }
+        })
+        .populate('customer')
+        .sort({ createdAt: -1 });
+        
+
+        return res.status(200).json(chatOrders);
+    } catch (error) {
+        console.error('Error fetching chat orders:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+
+const updateChatOrderStatus = async (req, res) => {
+    const { orderId } = req.params;
+    const { newStatus } = req.body;
+
+    console.log("orderId, newStatus==>>", orderId, newStatus);
+
+    try {
+        // Find the admin vendor
+        const adminVendor = await Vendor.findOne({ role: 'admin' });
+
+        if (!adminVendor) {
+            return res.status(404).json({ error: 'Admin vendor not found' });
+        }
+
+        // Find the order by ID and update the status for the admin vendor
+        const order = await ChatOrder.findOneAndUpdate(
+            { _id: orderId, vendor: adminVendor._id },
+            { $set: { orderStatus: newStatus } },
+            { new: true }
+        );
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found or admin vendor not assigned to order' });
+        }
+
+        // If the new status is 'Delivered', calculate and update deliveredInMin
+        if (newStatus === 'Delivered') {
+            const currentTime = new Date();
+            const createdAt = order.createdAt;
+            const deliveredInMin = Math.floor((currentTime - createdAt) / 60000); // Difference in minutes
+
+            order.deliveredInMin = deliveredInMin;
+
+            // Save the updated order
+            await order.save();
+        }
+
+        // Extract customer ID from the order
+        const customerId = order.customer._id;
+
+        // Retrieve the customer from database to get FCM token
+        const customer = await Customer.findById(customerId);
+        if (!customer) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+
+        const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
+
+        const title = 'Chat Order Status Updated';
+        const body = `The status of your chat order: ${order.orderMessage}, has been updated to ${newStatus}.`;
+        try {
+            // Assuming you have a function or service to send push notifications
+            let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+            console.log("Push notification response:", pushNotificationRes);
+        } catch (error) {
+            console.error('Error sending push notification:', error);
+        }
+
+        res.json(order);
+    } catch (error) {
+        console.error('Error updating order status:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+
+const getChatOrdersByVendor = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+
+        const pipeline = [
+            { $unwind: "$vendor" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendor": vendorId } });
+        }
+
+        const vendorOrders = await ChatOrder.aggregate([
+            ...pipeline,
+            {
+                $lookup: {
+                    from: "customers", // The name of the customers collection
+                    localField: "customer",
+                    foreignField: "_id",
+                    as: "customerDetails"
+                }
+            },
+            // Unwind the customerDetails array to get the object
+            { $unwind: "$customerDetails" },
+            // Lookup to join vendor details
+            {
+                $lookup: {
+                    from: "vendors", // The name of the vendors collection
+                    localField: "vendor",
+                    foreignField: "_id",
+                    as: "vendorDetails"
+                }
+            },
+            // Unwind the vendorDetails array to get the object
+            { $unwind: "$vendorDetails" },
+            // Group the data by order
+            {
+                $group: {
+                    _id: {
+                        orderId: "$_id",
+                        shortId: "$orderId",
+                        orderStatus: "$orderStatus",
+                        customer: "$customerDetails",
+                        shippingAddress: "$shippingAddress",
+                        orderMessage: "$orderMessage",
+                        vendor: "$vendorDetails",
+                        orderStatus: "$orderStatus",
+                        totalAmount: "$totalAmount",
+                        isPaymentVerified: "$isPaymentVerified",
+                        paymentStatus: "$paymentStatus",
+                        products: "$products",
+                        createdAt: "$createdAt",
+                        is_new: "$is_new"
+                    }
+                }
+            },
+            // Project to reshape the output document
+            {
+                $project: {
+                    _id: 0,
+                    orderId: "$_id.orderId",
+                    shortId: "$_id.shortId",
+                    orderStatus: "$_id.orderStatus",
+                    customer: "$_id.customer",
+                    shippingAddress: "$_id.shippingAddress",
+                    isPaymentVerified: "$_id.isPaymentVerified",
+                    paymentStatus: "$_id.paymentStatus",
+                    products: "$_id.products",
+                    createdAt: "$_id.createdAt",
+                    is_new: "$_id.is_new",
+                    orderMessage: "$_id.orderMessage",
+                    totalAmount: "$_id.totalAmount",
+                    vendors: {
+                        vendor: "$_id.vendor",
+                        orderStatus: "$_id.orderStatus"
+                    }
+                }
+            },
+            // Sort by createdAt in descending order
+            { $sort: { createdAt: -1 } }
+        ]);
+
+        res.status(200).json({
+            success: true,
+            data: vendorOrders
+        });
+    } catch (error) {
+        console.error("Error fetching orders for vendor: ", error);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error'
+        });
+    }
+};
+
+const updateOrderAmountAndStatus = async (req, res) => {
+    console.log("updateOrderAmountAndStatus api")
+    try {
+        const { chatOrderId, totalAmount } = req.body;
+
+        console.log("chatOrderId, totalAmount-->>", chatOrderId, totalAmount)
+
+
+        if (!chatOrderId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid Chat Order ID'
+            });
+        }
+
+        if (typeof totalAmount !== 'number' || totalAmount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid total amount'
+            });
+        }
+
+        const updatedOrder = await ChatOrder.findOneAndUpdate(
+            { _id: chatOrderId }, // Find by orderId field
+            {
+                totalAmount: totalAmount,
+                orderStatus: 'Pending',
+                updatedAt: new Date()
+            },
+            { new: true }
+        );
+
+
+
+
+        if (!updatedOrder) {
+            return res.status(404).json({
+                success: false,
+                message: 'Chat Order not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: updatedOrder
+        });
+    } catch (error) {
+        console.error('Error updating Chat Order: ', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error'
+        });
+    }
+};
+
+const updateChatPaymentStatusManually = async (req, res) => {
+    try {
+        console.log("updatePaymentStatus")
+        // Extract required fields from the request body
+        const { orderId, newStatus } = req.body;
+
+        console.log("orderId, newStatus-->>", orderId, newStatus)
+
+        // Ensure all required fields are present
+        if (!newStatus || !orderId) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Find the order in the database using the orderId
+        let order = await ChatOrder.findById(orderId);
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (newStatus === 'Paid') {
+            order.isPaymentVerified = true;
+            order.paymentStatus = 'Paid';
+        } else {
+            order.isPaymentVerified = false;
+            order.paymentStatus = 'Unpaid';
+        }
+
+
+
+        // Save the updated order
+        const updatedOrder = await order.save();
+
+        res.status(200).json(updatedOrder);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+
+
+const getNewChatOrdersCountByVendor = async (req, res) => {
+    console.log("it is called?")
+    try {
+        const vendorId = req.params.vendorId; // Assuming vendorId is passed as a URL parameter
+
+        // Count new orders for the specific vendor
+        const newOrdersCount = await ChatOrder.countDocuments({
+            'vendor': vendorId,
+            is_new: true
+        });
+
+        console.log("newchatOrdersCount-->>", newOrdersCount)
+
+        res.status(200).json({ newOrdersCount });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'An error occurred while retrieving new orders count.' });
+    }
+};
+
+
+const markChatOrderViewed = async (req, res) => {
+    console.log("markOrderViewed is called")
+    try {
+        const vendorId = req.params.vendorId;
+
+        // Update only the orders for the given vendor to set is_new to false
+        await ChatOrder.updateMany(
+            { "vendor": vendorId, is_new: true },
+            { $set: { is_new: false } }
+        );
+
+        res.status(200).json({ message: 'Vendor-specific orders marked as viewed' });
+    } catch (error) {
+        res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
+    }
+};
+module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually, getNewChatOrdersCountByVendor, markChatOrderViewed, updateChatOrder, getChatOrder , getChatOrdersHistoryByCustomer};
+
+
+=== src/modules/ChatOrdrer/model.js ===
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const orderSchema = new Schema({
+    orderId: {
+        type: String,
+        unique: true,
+        required: true
+    },
+    orderMessage: {
+        type: String,
+        required: true
+    },
+    products: [{
+        name: { type: String },
+        quantity: {
+            type: Number,
+            required: true,
+            min: 1
+        },
+        price: {
+            type: Number,
+            required: true,
+            min: 0
+        },
+        discount: {
+            type: Number,
+            default: 0,
+            min: 0,
+            max: 100
+        },
+        totalAmount: {
+            type: Number,
+            min: 0
+        }
+    }],
+    customer: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Customer',
+        required: true,
+    },
+    name: { type: String },
+    shippingAddress: {type: mongoose.Schema.Types.Mixed},
+    paymentStatus: {
+        type: String,
+        enum: ['Paid', 'Unpaid'],
+        default: 'Unpaid'
+    },
+    deliveredInMin:{
+        type: Number,
+    },
+    orderStatus: {
+        type: String,
+        enum: ['In Review', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],
+        default: 'In Review'
+    },
+    is_new: {
+        type: Boolean,
+        default: true
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
+    },
+    totalAmount: {
+        type: Number,
+    },
+    arrivalAt: {
+        type: Date,
+    },
+    vendor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Vendor',
+        required: true
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
+    },
+    isPaymentVerified: {
+        type: Boolean,
+        default: false
+    },
+});
+
+// Middleware to generate unique orderId and set the vendor to admin
+orderSchema.pre('validate', async function (next) {
+    if (this.isNew) {
+        // Generate a unique 6-digit orderId
+        let isUnique = false;
+
+        while (!isUnique) {
+            const uniqueId = Math.floor(100000 + Math.random() * 900000).toString();
+            const existingOrder = await mongoose.models.ChatOrder.findOne({ orderId: uniqueId });
+
+            if (!existingOrder) {
+                this.orderId = uniqueId;
+                isUnique = true;
+            }
+        }
+
+        // Find the admin vendor
+        const adminVendor = await mongoose.models.Vendor.findOne({ role: 'admin' });
+        if (!adminVendor) {
+            return next(new Error('Admin vendor not found'));
+        }
+
+        // Set the vendor to admin
+        this.vendor = adminVendor._id;
+    }
+
+    this.arrivalAt = new Date(Date.now() + 90 * 60 * 1000);
+
+    next();
+});
+
+const ChatOrder = mongoose.model('ChatOrder', orderSchema);
+
+module.exports = ChatOrder;
+
+
+=== src/modules/Banner/route.js ===
+const express = require('express');
+const router = express.Router();
+const bannerController = require('./controller'); // Adjust the path as necessary
+const handleUpload = require('../Middleware/uploadHandler');
+
+// Define the upload directory
+const uploadDir = 'uploads/banner';
+
+
+// Route to add a new Banner with file upload middleware
+router.post('/banner', handleUpload(uploadDir), bannerController.addBanner);
+router.put('/banner/:id', handleUpload(uploadDir), bannerController.updateBanner);
+router.put('/banner-active/:id', bannerController.makeBannerActive);
+router.delete('/banner/:id', bannerController.deleteBanner);
+router.get('/banner', bannerController.getAllBanner);
+router.get('/all-active-banner', bannerController.getAllActiveBanner);
+router.get('/banner/:id', bannerController.getBannerById);
+
+module.exports = router;
+
+
+=== src/modules/Banner/controller.js ===
+const Banner = require('./model'); // Adjust the path as necessary
+const fs = require('fs');
+const path = require('path');
+
+// Controller function to add a new banner
+exports.addBanner = async (req, res) => {
+
+    try {
+        const { name } = req.body;
+        const images = req.files.map(file => file.path); // Get the paths of the uploaded images
+
+        // Create a new banner instance
+        const newBanner = new Banner({
+            name,
+            images
+        });
+
+        // Save the banner to the database
+        const savedBanner = await newBanner.save();
+
+        // Send response
+        res.status(201).json({
+            message: 'Banner created successfully',
+            banner: savedBanner
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to create banner',
+            error: error.message
+        });
+    }
+};
+
+// Controller function to update an existing banner
+exports.updateBanner = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, existingImages } = req.body;
+
+        // console.log("existingImages-->>", existingImages);
+
+        // Find the banner by ID
+        const banner = await Banner.findById(id);
+
+        if (!banner) {
+            return res.status(404).json({
+                message: 'Banner not found'
+            });
+        }
+
+        // Delete banner images from the file system that are not in existingImages
+        banner.images.forEach(imagePath => {
+            if (!existingImages.includes(imagePath)) {
+                console.log("Deleting imagePath-->>", imagePath);
+                const fullPath = path.join(imagePath); // Adjust the path accordingly
+                fs.unlink(fullPath, err => {
+                    if (err) {
+                        console.error(`Failed to delete image file: ${fullPath}`, err);
+                    }
+                });
+            }
+        });
+
+        // Update the banner details
+        banner.name = name || banner.name;
+
+        // Combine existing images and new uploaded images
+        const newImages = req.files.map(file => file.path);
+        banner.images = existingImages ? existingImages.concat(newImages) : newImages;
+
+        // Save the updated banner to the database
+        const updatedBanner = await banner.save();
+
+        // Send response
+        res.status(200).json({
+            message: 'Banner updated successfully',
+            banner: updatedBanner
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to update banner',
+            error: error.message
+        });
+    }
+};
+
+exports.makeBannerActive = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isActive } = req.body;
+
+        if (typeof isActive !== 'boolean') {
+            return res.status(400).json({
+                message: 'Invalid isActive value. It should be a boolean.'
+            });
+        }
+
+        console.log("isActive--->>", isActive);
+
+        // Find the banner by ID
+        const banner = await Banner.findById(id);
+
+        if (!banner) {
+            return res.status(404).json({
+                message: 'Banner not found'
+            });
+        }
+
+        // Update the banner details
+        banner.isActive = isActive;
+
+        console.log("banner-->>", banner);
+
+        // Save the updated banner to the database
+        const updatedBanner = await banner.save();
+
+        // Send response
+        res.status(200).json({
+            message: 'Banner status updated successfully',
+            banner: updatedBanner
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to update banner status',
+            error: error.message
+        });
+    }
+};
+
+
+
+// Controller function to get all banners
+exports.getAllBanner = async (req, res) => {
+    try {
+        // Fetch all banners from the database
+        const banners = await Banner.find();
+
+        // Send the banners in the response
+        res.status(200).json({
+            message: 'Banners retrieved successfully',
+            banners
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to retrieve banners',
+            error: error.message
+        });
+    }
+};
+
+// Controller function to get all active banners
+exports.getAllActiveBanner = async (req, res) => {
+    try {
+        // Fetch all active banners from the database
+        const banners = await Banner.find({ isActive: true });
+
+        // Send the banners in the response
+        res.status(200).json({
+            message: 'Active banners retrieved successfully',
+            banners
+        });
+    } catch (error) {
+        console.error('Error fetching active banners:', error);
+        res.status(500).json({
+            message: 'Failed to retrieve active banners',
+            error: error.message
+        });
+    }
+};
+
+
+// Controller function to get a banner by ID
+exports.getBannerById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Find the banner by ID
+        const banner = await Banner.findById(id);
+
+        if (!banner) {
+            return res.status(404).json({
+                message: 'Banner not found'
+            });
+        }
+
+        // Send the banner in the response
+        res.status(200).json({
+            message: 'Banner retrieved successfully',
+            banner
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to retrieve banner',
+            error: error.message
+        });
+    }
+};
+
+
+// Controller function to delete a banner by ID
+exports.deleteBanner = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Find and delete the banner by ID
+        const deletedBanner = await Banner.findByIdAndDelete(id);
+
+        if (!deletedBanner) {
+            return res.status(404).json({
+                message: 'Banner not found'
+            });
+        }
+
+        // Delete banner images from the file system
+        deletedBanner.images.forEach(imagePath => {
+            const fullPath = path.join(imagePath); // Adjust the path accordingly
+            fs.unlink(fullPath, err => {
+                if (err) {
+                    console.error(`Failed to delete image file: ${fullPath}`, err);
+                }
+            });
+        });
+
+        // Send response confirming deletion
+        res.status(200).json({
+            message: 'Banner deleted successfully',
+            banner: deletedBanner
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Failed to delete banner',
+            error: error.message
+        });
+    }
+};
+
+
+=== src/modules/Banner/model.js ===
+// Import mongoose
+const mongoose = require('mongoose');
+
+// Define the Banner Schema
+const bannerSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    images: {
+        type: [String],  // Array of strings to store image URLs or paths
+        validate: [arrayLimit, '{PATH} exceeds the limit of 10'] // Optional: Limit the number of images
+    },
+    isActive: { type: Boolean, default: false }
+
+}, {
+    timestamps: true // Automatically add createdAt and updatedAt timestamps
+});
+
+// Custom validator to limit array size
+function arrayLimit(val) {
+    return val.length <= 10;
+}
+
+// Create the Banner Model
+const Banner = mongoose.model('Banner', bannerSchema);
+
+// Export the Banner Model
+module.exports = Banner;
+
+
+=== src/modules/Customer/route.js ===
+const express = require('express');
+const router = express.Router();
+const customerController = require('./controller');
+const authenticateToken = require('../Middleware/authMiddleware');
+const authorizeAdmin = require('../Middleware/authorizeMiddleware');
+const handleUpload = require('../Middleware/uploadHandler');
+
+// Define the upload directory
+const uploadDir = 'uploads/customer';
+
+// Route to create a new customer
+router.post('/customers/signup', customerController.createCustomer);
+
+// Route for customers login
+router.post('/customers/login', customerController.customerLogin);
+
+// Route for customers login
+router.post('/customers/login/phone', customerController.customerLoginPhone);
+
+// send otp test
+router.post('/send-otp', customerController.sendOtp);
+
+// Route to get a customer by ID
+router.get('/customers/:id', customerController.getCustomerById);
+
+
+// Route to delete a customer by ID
+router.delete('/customers/:id', customerController.deleteCustomer);
+
+//save address
+router.post('/address/:id', customerController.saveAddressAndLocalities);
+router.get('/address/:id', customerController.getShippingAddresses);
+router.put('/address/:id/:addressId', customerController.updateShippingAddress);
+router.delete('/address/:id/:addressId', customerController.deleteShippingAddress);
+
+router.put('/customer/:userId/address/:addressId/activate', customerController.setActiveAddress);
+router.put('/update-customer-documents', customerController.updateCustomerDocuments);
+// Route to get all customers
+router.get('/customers', authenticateToken, authorizeAdmin, customerController.getAllCustomers);
+
+//Restrict customers
+router.put('/customers/restrict/:id', authenticateToken, authorizeAdmin, customerController.restrictCustomer);
+
+//UnRestrict customers
+router.put('/customers/unrestrict/:id', authenticateToken, authorizeAdmin, customerController.unRestrictCustomer);
+
+router.post('/check-restricted', customerController.checkIfUserIsRestricted);
+
+// Route to update a customer by ID
+router.put('/single-customer/:id',handleUpload(uploadDir), customerController.updateCustomer);
+router.put('/update-fcm/:id', customerController.updateFcm);
+
+
+module.exports = router;
+
+
+=== src/modules/Customer/controller.js ===
+const Customer = require("./model"); // Ensure the correct path to the customer model
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const sendOtp = require("../utils/sendOtp");
+require("dotenv").config();
+const secret = process.env.JWT_SECRET;
+
+// Controller function to create a new customer
+exports.createCustomer = async (req, res) => {
+  try {
+    console.log("req--->>>", req.body);
+    const { name, password, email, contactNumber, availableLocalities } =
+      req.body;
+
+    if (!password || !email || !contactNumber || !availableLocalities) {
+      return res.status(400).send({ error: "All fields are required" });
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Check if the email already exists
+    const existingCustomer = await Customer.findOne({ email });
+    if (existingCustomer) {
+      return res.status(400).send({ error: "Email already in use" });
+    }
+
+    // Create a new customer with the hashed password
+    const newCustomer = new Customer({
+      name,
+      password: hashedPassword,
+      email,
+      contactNumber,
+      availableLocalities,
+      role: "customer",
+    });
+
+    await newCustomer.save();
+    res.status(201).send(newCustomer);
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .send({ error: "An error occurred while creating the customer" });
+  }
+};
+
+exports.customerLogin = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    // Find customer by email
+    const customer = await Customer.findOne({ email });
+
+    // Check if customer exists
+    if (!customer) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    // Check if the customer is restricted
+    if (customer.isRestricted) {
+      return res.status(403).json({
+        message: "Your account is restricted. Please contact support.",
+      });
+    }
+
+    // Check if password matches
+    const isPasswordMatch = await bcrypt.compare(password, customer.password);
+    if (!isPasswordMatch) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    // Generate a token
+    const token = jwt.sign({ id: customer._id, role: customer.role }, secret);
+
+    // Customer authenticated successfully
+    res.status(200).json({ message: "Login successful", customer, token });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.customerLoginPhone = async (req, res) => {
+  const { phoneNumber, uid } = req.body;
+
+  try {
+    if (!phoneNumber || !uid) {
+      return res.status(400).send({ error: "All fields are required" });
+    }
+
+    let customer;
+
+    const existingCustomer = await Customer.findOne({
+      contactNumber: phoneNumber,
+    });
+    customer = existingCustomer;
+
+    if (!existingCustomer) {
+      // Create a new customer with the contact number
+      const newCustomer = new Customer({
+        contactNumber: phoneNumber,
+        role: "customer",
+      });
+
+      await newCustomer.save();
+      customer = newCustomer;
+    }
+
+    // Generate a token
+    const token = jwt.sign({ id: customer._id, role: customer.role }, secret);
+
+    res.status(200).json({ message: "Login successful", customer, token });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Controller function to get a customer by ID
+exports.getCustomerById = async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
+    if (!customer) {
+      return res.status(404).send();
+    }
+    res.status(200).send(customer);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+};
+
+// Controller function to update a customer by ID
+
+exports.updateCustomer = async (req, res) => {
+  //console.log("it is called!!");
+  try {
+    // Extract customer ID from route parameters
+    const customerId = req.params.id;
+
+    console.log("customerId--->>", customerId);
+
+    // Extract new customer details from request body
+    const updatedData = req.body;
+
+    // Handle file uploads if any
+    if (req.files && req.files.length > 0) {
+      const filePaths = req.files.map((file) => file.path);
+      updatedData.image = filePaths[0]; // Assuming one image per customer, adjust as needed
+    }
+
+    // Find the customer by ID and update their details
+    const updatedCustomer = await Customer.findByIdAndUpdate(
+      customerId,
+      updatedData,
+      { new: true, runValidators: true }
+    );
+
+    console.log("updatedCustomer", updatedCustomer);
+
+    // Check if customer was found and updated
+    if (!updatedCustomer) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+    // Respond with the updated customer details
+    res.status(200).json(updatedCustomer);
+  } catch (error) {
+    // Handle errors and send error response
+    console.error("Error updating customer:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.updateFcm = async (req, res) => {
+  //console.log("it is called!!");
+  try {
+    // Extract customer ID from route parameters
+    const customerId = req.params.id;
+
+    console.log("customerId--->>", customerId);
+
+    // Extract new customer details from request body
+    const updatedData = req.body;
+
+    console.log("updatedData-->>", updatedData);
+
+    // Find the customer by ID and update their details
+    const updatedCustomer = await Customer.findByIdAndUpdate(
+      customerId,
+      updatedData,
+      { new: true, runValidators: true }
+    );
+
+    // Check if customer was found and updated
+    if (!updatedCustomer) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+    // Respond with the updated customer details
+    res.status(200).json(updatedCustomer);
+  } catch (error) {
+    // Handle errors and send error response
+    console.error("Error updating customer:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Controller function to delete a customer by ID
+exports.deleteCustomer = async (req, res) => {
+  try {
+    const customer = await Customer.findByIdAndDelete(req.params.id);
+    if (!customer) {
+      return res.status(404).send();
+    }
+    res.status(200).send(customer);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+};
+
+exports.sendOtp = async (req, res) => {
+  const { phoneNumber } = req.body;
+
+  if (!phoneNumber) {
+    return res.status(400).json({ message: "Phone number is required" });
+  }
+
+  // Generate a 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000);
+
+  const result = await sendOtp(phoneNumber, otp);
+
+  if (result) {
+    res.status(200).json({ message: "OTP sent successfully", otp });
+  } else {
+    res.status(500).json({ message: "Failed to send OTP" });
+  }
+};
+
+// Controller function to save address and available localities for a user
+exports.saveAddressAndLocalities = async (req, res) => {
+  try {
+    const {
+      addressLine1,
+      landmark,
+      city,
+      state,
+      country,
+      postalCode,
+      name,
+      phone,
+    } = req.body;
+    const { id } = req.params; // Assuming userId is passed in the URL params or request body
+
+    // Find the user by userId
+    const user = await Customer.findById(id);
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if shippingAddresses array is empty
+    if (user.shippingAddresses.length === 0) {
+      // If empty, set isActive to true for the new address
+      const newAddress = {
+        name,
+        phone,
+        address: addressLine1,
+        landmark,
+        city,
+        state,
+        country,
+        postalCode,
+        isActive: true, // Set isActive to true for the first address
+      };
+      user.shippingAddresses.push(newAddress);
+    } else {
+      // If not empty, add the new address with isActive false
+      const newAddress = {
+        name,
+        phone,
+        address: addressLine1,
+        landmark,
+        city,
+        state,
+        country,
+        postalCode,
+      };
+      user.shippingAddresses.push(newAddress);
+    }
+
+    // Set availableLocalities to the postalCode of the active address
+    const activeAddress = user.shippingAddresses.find((addr) => addr.isActive);
+    if (activeAddress) {
+      user.availableLocalities = activeAddress.postalCode;
+    }
+
+    // Save the updated user
+    await user.save();
+
+    return res
+      .status(200)
+      .json({ message: "Address and localities saved successfully", user });
+  } catch (error) {
+    console.error("Error saving address and localities:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+exports.updateShippingAddress = async (req, res) => {
+  try {
+    const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
+    const {
+      addressLine1,
+      landmark,
+      city,
+      state,
+      country,
+      postalCode,
+      name,
+      phone,
+      isActive,
+    } = req.body;
+
+    console.log("landmark-->>", landmark);
+
+    // Find the user by userId
+    const user = await Customer.findById(id);
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Find the address by addressId
+    const addressIndex = user.shippingAddresses.findIndex(
+      (address) => address._id.toString() === addressId
+    );
+
+    if (addressIndex === -1) {
+      return res.status(404).json({ error: "Address not found" });
+    }
+
+    // Update the address fields
+    user.shippingAddresses[addressIndex] = {
+      ...user.shippingAddresses[addressIndex],
+      name,
+      phone,
+      address: addressLine1,
+      landmark,
+      city,
+      state,
+      country,
+      postalCode,
+      isActive,
+    };
+
+    // Set availableLocalities to the postalCode of the active address
+    const activeAddress = user.shippingAddresses.find((addr) => addr.isActive);
+    if (activeAddress) {
+      user.availableLocalities = activeAddress.postalCode;
+    }
+
+    // Save the updated user
+    await user.save();
+
+    return res
+      .status(200)
+      .json({ message: "Shipping address updated successfully", user });
+  } catch (error) {
+    console.error("Error updating shipping address:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+exports.deleteShippingAddress = async (req, res) => {
+  try {
+    const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
+
+    // Find the user by userId
+    const user = await Customer.findById(id);
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Find the address by addressId
+    const addressIndex = user.shippingAddresses.findIndex(
+      (address) => address._id.toString() === addressId
+    );
+
+    if (addressIndex === -1) {
+      return res.status(404).json({ error: "Address not found" });
+    }
+
+    // Check if the address being deleted is the active address
+    const isActiveAddress = user.shippingAddresses[addressIndex].isActive;
+
+    // Remove the address from the array
+    user.shippingAddresses.splice(addressIndex, 1);
+
+    // If the active address was deleted, set availableLocalities to null
+    if (isActiveAddress) {
+      user.availableLocalities = null;
+
+      // Optionally, you could make another address active (if any remain)
+      if (user.shippingAddresses.length > 0) {
+        user.shippingAddresses[0].isActive = true; // Set the first remaining address as active
+        user.availableLocalities = user.shippingAddresses[0].postalCode; // Update availableLocalities
+      }
+    }
+
+    // Save the updated user
+    await user.save();
+
+    return res
+      .status(200)
+      .json({ message: "Shipping address deleted successfully", user });
+  } catch (error) {
+    console.error("Error deleting shipping address:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+exports.getShippingAddresses = async (req, res) => {
+  try {
+    const { id } = req.params; // Assuming userId is passed in the URL params
+
+    // Find the user by userId
+    const user = await Customer.findById(id);
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Retrieve the shipping addresses
+    const shippingAddresses = user.shippingAddresses;
+
+    return res.status(200).json({ shippingAddresses });
+  } catch (error) {
+    console.error("Error fetching shipping addresses:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+exports.setActiveAddress = async (req, res) => {
+  try {
+    const { userId, addressId } = req.params;
+
+    // Find the customer by userId
+    const user = await Customer.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if the addressId exists in the user's shippingAddresses
+    const address = user.shippingAddresses.id(addressId);
+
+    if (!address) {
+      return res.status(404).json({ error: "Address not found" });
+    }
+
+    // Set all addresses to inactive
+    user.shippingAddresses.forEach((addr) => {
+      addr.isActive = false;
+    });
+
+    // Set the specific address to active
+    address.isActive = true;
+
+    // Update availableLocalities with the postal code of the active address
+    user.availableLocalities = address.postalCode;
+
+    // Save the updated user
+    await user.save();
+
+    return res
+      .status(200)
+      .json({ message: "Address set as active successfully", user });
+  } catch (error) {
+    console.error("Error setting active address:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+exports.updateCustomerDocuments = async (req, res) => {
+  try {
+    const customers = await Customer.find({}); // Fetch all customer documents
+
+    for (const customer of customers) {
+      if (
+        customer.shippingAddresses &&
+        !Array.isArray(customer.shippingAddresses)
+      ) {
+        // Convert shippingAddresses to an array if it's an object
+        customer.shippingAddresses = [customer.shippingAddresses];
+      }
+
+      // Ensure availableLocalities is updated as necessary, since the schema change might require different handling
+      // if (typeof customer.availableLocalities === 'string') {
+      //   customer.availableLocalities = customer.availableLocalities.split(','); // Example conversion, modify as needed
+      // }
+
+      // Save the updated document
+      await customer.save();
+    }
+
+    res
+      .status(200)
+      .json({ message: "Customer documents updated successfully" });
+  } catch (error) {
+    console.error("Error updating customer documents:", error);
+    res
+      .status(500)
+      .json({ message: "Error updating customer documents", error });
+  }
+};
+
+// Controller to fetch all customer with role 'customer'
+exports.getAllCustomers = async (req, res) => {
+  try {
+    // Fetch only customer with the role 'customer'
+    const customers = await Customer.find({ role: "customer" });
+    console.log("customers api", customers);
+    res.status(200).send(customers);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+};
+
+//restrict customer login
+exports.restrictCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the customer by ID and update the isRestricted field to true
+    const updatedCustomer = await Customer.findByIdAndUpdate(
+      id,
+      { isRestricted: true },
+      { new: true }
+    );
+
+    if (!updatedCustomer) {
+      return res.status(404).json({
+        message: "Customer not found",
+      });
+    }
+
+    // Send response confirming the update
+    res.status(200).json({
+      message: "Customer restricted successfully",
+      customer: updatedCustomer,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to restrict customer",
+      error: error.message,
+    });
+  }
+};
+
+//Un-restrict customer login
+exports.unRestrictCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the customer by ID and update the isRestricted field to true
+    const updatedCustomer = await Customer.findByIdAndUpdate(
+      id,
+      { isRestricted: false },
+      { new: true }
+    );
+
+    if (!updatedCustomer) {
+      return res.status(404).json({
+        message: "Customer not found",
+      });
+    }
+
+    // Send response confirming the update
+    res.status(200).json({
+      message: "Customer unrestricted successfully",
+      customer: updatedCustomer,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to unrestrict customer",
+      error: error.message,
+    });
+  }
+};
+
+exports.checkIfUserIsRestricted = async (req, res) => {
+  try {
+    const { email, contactNumber } = req.body;
+
+    console.log("contactNumber-->>", contactNumber, email);
+
+    // Validate if at least one identifier is provided
+    if (!email && !contactNumber) {
+      return res
+        .status(400)
+        .json({ error: "Email or contact number is required" });
+    }
+
+    // Find the customer by email or contact number
+    const customer = await Customer.findOne({ contactNumber });
+
+    console.log("customer--->>", customer);
+
+    // If customer is not found, return an error
+    if (!customer) {
+      return res.status(200).json({ error: "Customer not found" });
+    }
+
+    // Check if the customer is restricted
+    if (customer.isRestricted) {
+      return res.status(403).json({ message: "User is restricted" });
+    }
+
+    // If the user is not restricted
+    return res.status(200).json({ message: "User is not restricted" });
+  } catch (error) {
+    // Handle any errors
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+
+=== src/modules/Customer/model.js ===
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+// Define the schema
+const customerSchema = new Schema({
+  name: {
+    type: String,
+  },
+  password: {
+    type: String,
+  },
+  image: {
+    type: String,
+  },
+  contactNumber: {
+    type: String,
+    required: true
+  },
+  shippingAddresses: [
+    {
+      name: {
+        type: String,
+      },
+      phone: {
+        type: String,
+      },
+      landmark: {
+        type: String,
+      },
+      address: {
+        type: String,
+      },
+      city: {
+        type: String,
+      },
+      state: {
+        type: String,
+      },
+      country: {
+        type: String,
+      },
+      postalCode: {
+        type: String,
+      },
+      isActive: {
+        type: Boolean,
+        default: false
+      }
+    }
+  ],
+  availableLocalities: {
+    type: String,
+  },
+  role: {
+    type: String,
+    default: 'customer'
+  },
+  fcmDeviceToken: {
+    type: String,
+  },
+  isRestricted: {
+    type: Boolean,
+    default: false
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+
+
+// Method to compare passwords
+customerSchema.methods.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+// Create the model
+const Customer = mongoose.model('Customer', customerSchema);
+
+module.exports = Customer;
+//
+
+=== src/modules/Vendor/route.js ===
+const express = require("express");
+const router = express.Router();
+const vendorController = require("./controller");
+const authorizeAdmin = require("../Middleware/authorizeMiddleware");
+const authenticateToken = require("../Middleware/authMiddleware");
+
+// Route to create a new vendor
+router.post("/signup", vendorController.createVendor);
+
+// Route to get all vendors
+router.get(
+  "/",
+  authenticateToken,
+  authorizeAdmin,
+  vendorController.getAllVendors
+);
+
+// Route to get a vendor by ID
+router.get("/:id", vendorController.getVendorById);
+
+// Route to update a vendor by ID
+router.put("/:id", vendorController.updateVendor);
+
+// Restrict Vendor
+router.put(
+  "/restrict/:id",
+  authenticateToken,
+  authorizeAdmin,
+  vendorController.restrictVendor
+);
+
+// UnRestrict Vendor
+router.put(
+  "/unrestrict/:id",
+  authenticateToken,
+  authorizeAdmin,
+  vendorController.unRestrictVendor
+);
+
+// Route to delete a vendor by ID
+router.delete("/:id", vendorController.deleteVendor);
+
+// Route for vendor login
+router.post("/login", vendorController.vendorLogin);
+
+// Get all vendors (online + offline)
+router.get("/all/vendor", vendorController.getAllVendors);
+
+// Get nearby vendors (based on location)
+router.get("/nearby/vendor", vendorController.getNearbyVendors);
+
+// Toggle vendor status (on/off)
+router.patch("/toggle-status/:id", vendorController.toggleVendorStatus);
+
+// Get vendors by category
+router.get("/by-category/:categoryId", vendorController.getVendorsByCategory);
+
+// Search vendors
+router.get("/search", vendorController.searchVendors);
+
+// Vendor details
+router.get("/:id/details", vendorController.getVendorDetails);
+
+module.exports = router;
+
+
+=== src/modules/Vendor/controller.js ===
+const Vendor = require("./model.js");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+
+require("dotenv").config();
+const secret = process.env.JWT_SECRET;
+
+// Controller function to create a new vendor
+exports.createVendor = async (req, res) => {
+  try {
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
+
+    // 👇 MODIFIED: Build the location object, now including the address
+    // The request body should now send address details inside the location object.
+    const location = req.body.location
+      ? {
+          type: "Point",
+          coordinates: req.body.location.coordinates, // [lng, lat]
+          address: req.body.location.address, // Address is now nested here
+        }
+      : undefined;
+
+    // Create a new vendor with the hashed password
+    const newVendor = new Vendor({
+      name: req.body.name,
+      password: hashedPassword,
+      email: req.body.email,
+      vendorInfo: req.body.vendorInfo, // This object no longer contains the address
+      category: req.body.category,
+      role: "vendor",
+      isOnline: req.body.isOnline ?? true,
+      status: req.body.status ?? "online",
+      location, // Assign the newly constructed location object
+    });
+
+    // Save the new vendor to the database
+    await newVendor.save();
+
+    res.status(201).json({
+      message: "Vendor registered successfully",
+      vendor: newVendor,
+    });
+  } catch (error) {
+    console.error("error===>>", error);
+    res.status(400).json({
+      message: "Failed to register vendor",
+      error: error.message,
+    });
+  }
+};
+
+// Controller function to update a vendor by ID
+exports.updateVendor = async (req, res) => {
+  const updates = Object.keys(req.body);
+  // 👇 MODIFIED: Updated the list of allowed fields for modification
+  const allowedUpdates = [
+    "name",
+    "email",
+    "password",
+    "vendorInfo",
+    "location", // 'location' is now an allowed update
+    "category",
+    "isOnline",
+    "status",
+  ];
+  const isValidOperation = updates.every((update) =>
+    allowedUpdates.includes(update)
+  );
+
+  if (!isValidOperation) {
+    return res.status(400).send({ error: "Invalid updates!" });
+  }
+
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).send();
+    }
+
+    // Handle password update separately to ensure it's hashed
+    if (updates.includes("password")) {
+      req.body.password = await bcrypt.hash(req.body.password, 10);
+    }
+
+    updates.forEach((update) => (vendor[update] = req.body[update]));
+    vendor.updatedAt = Date.now(); // Update the timestamp
+    await vendor.save();
+
+    res.status(200).send(vendor);
+  } catch (error) {
+    res.status(400).send(error);
+  }
+};
+
+// GET /vendors/search?q=...
+exports.searchVendors = async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) {
+      return res.status(400).json({ message: "Search query 'q' is required." });
+    }
+    // 👇 MODIFIED: Search logic now includes address fields inside location
+    const vendors = await Vendor.find({
+      $or: [
+        { name: new RegExp(q, "i") },
+        { "vendorInfo.businessName": new RegExp(q, "i") },
+        { "location.address.city": new RegExp(q, "i") },
+        { "location.address.state": new RegExp(q, "i") },
+        { "location.address.postalCode": new RegExp(q, "i") },
+      ],
+    }).select("-password");
+
+    res.status(200).json(vendors);
+  } catch (error) {
+    res.status(500).json({ message: "Error searching vendors", error });
+  }
+};
+
+// ======================================================= //
+// ======== NO CHANGES NEEDED FOR FUNCTIONS BELOW ======== //
+// ======================================================= //
+
+// Controller to fetch all vendors with role 'vendor'
+exports.getAllVendors = async (req, res) => {
+  try {
+    const vendors = await Vendor.find().select("-password");
+    res.status(200).json(vendors);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching vendors", error });
+  }
+};
+
+// Controller function to get a vendor by ID
+exports.getVendorById = async (req, res) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).send();
+    }
+    res.status(200).send(vendor);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+};
+
+// Controller function to delete a vendor by ID
+exports.deleteVendor = async (req, res) => {
+  try {
+    const vendor = await Vendor.findByIdAndDelete(req.params.id);
+    if (!vendor) {
+      return res.status(404).send();
+    }
+    res.status(200).send(vendor);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+};
+
+// Controller function for vendor login
+exports.vendorLogin = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const vendor = await Vendor.findOne({ email });
+    if (!vendor) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+    if (vendor.isRestricted) {
+      return res.status(403).json({
+        message: "Your account is restricted. Please contact support.",
+      });
+    }
+    const isPasswordMatch = await vendor.comparePassword(password);
+    if (!isPasswordMatch) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+    const token = jwt.sign({ id: vendor._id, role: vendor.role }, secret);
+    res
+      .status(200)
+      .json({ message: "Vendor authenticated successfully", vendor, token });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+//restrict vendor login
+exports.restrictVendor = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedVendor = await Vendor.findByIdAndUpdate(
+      id,
+      { isRestricted: true },
+      { new: true }
+    );
+    if (!updatedVendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+    res.status(200).json({
+      message: "Vendor restricted successfully",
+      vendor: updatedVendor,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to restrict vendor",
+      error: error.message,
+    });
+  }
+};
+
+//Un-restrict vendor login
+exports.unRestrictVendor = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedVendor = await Vendor.findByIdAndUpdate(
+      id,
+      { isRestricted: false },
+      { new: true }
+    );
+    if (!updatedVendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+    res.status(200).json({
+      message: "Vendor unrestricted successfully",
+      vendor: updatedVendor,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to unrestrict vendor",
+      error: error.message,
+    });
+  }
+};
+
+// GET /vendors/nearby?lat=...&lng=...
+exports.getNearbyVendors = async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    if (!lat || !lng) {
+      return res
+        .status(400)
+        .json({ message: "Latitude and longitude required" });
+    }
+    const vendors = await Vendor.aggregate([
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [parseFloat(lng), parseFloat(lat)],
+          },
+          distanceField: "distance",
+          spherical: true,
+          maxDistance: 5000,
+        },
+      },
+    ]);
+    res.status(200).json(vendors);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching nearby vendors", error });
+  }
+};
+
+// PATCH /vendors/:id/toggle-status
+exports.toggleVendorStatus = async (req, res) => {
+  try {
+    const vendorId = req.params.id;
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+    vendor.isOnline = !vendor.isOnline;
+    vendor.status = vendor.isOnline ? "online" : "offline";
+    vendor.updatedAt = Date.now();
+    await vendor.save();
+    res.status(200).json({
+      message: `Vendor status updated to ${vendor.status}`,
+      vendor,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Error toggling vendor status", error });
+  }
+};
+
+exports.getVendorsByCategory = async (req, res) => {
+  console.log("getVendorsByCategory is called");
+  try {
+    const { categoryId } = req.params;
+    const vendors = await Vendor.find({ category: categoryId }).select(
+      "-password"
+    );
+    res.status(200).json(vendors);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Error fetching vendors by category", error });
+  }
+};
+
+//Dukaan Details Page
+exports.getVendorDetails = async (req, res) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id).select("-password");
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    res.status(200).json(vendor);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching vendor details", error });
+  }
+};
+
+
+=== src/modules/Vendor/model.js ===
+const mongoose = require("mongoose");
+const Schema = mongoose.Schema;
+const bcrypt = require("bcrypt");
+
+// Define the schema
+const vendorSchema = new Schema({
+  name: {
+    type: String,
+  },
+  password: {
+    type: String,
+    required: true,
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  vendorInfo: {
+    businessName: {
+      type: String,
+    },
+    contactNumber: {
+      type: String,
+      required: true,
+    },
+    alternativeContactNumber: {
+      type: String,
+      required: true,
+    },
+  },
+
+  isOnline: {
+    type: Boolean,
+    default: true,
+  },
+  status: {
+    type: String,
+    enum: ["online", "offline"],
+    default: "online",
+  },
+
+  // 👇 Location object now contains both the address and coordinates
+  location: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point",
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      index: "2dsphere",
+    },
+    address: {
+      addressLine1: {
+        type: String,
+      },
+      addressLine2: String,
+      city: {
+        type: String,
+      },
+      state: {
+        type: String,
+      },
+      country: {
+        type: String,
+      },
+      postalCode: {
+        type: String,
+      },
+    },
+  },
+
+  category: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Category",
+    required: true,
+  },
+
+  role: {
+    type: String,
+    default: "vendor",
+  },
+  isRestricted: {
+    type: Boolean,
+    default: false,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+// Method to compare passwords
+vendorSchema.methods.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+// Create the model
+const Vendor = mongoose.model("Vendor", vendorSchema);
+
+module.exports = Vendor;
+
+
+=== src/modules/Reports/route.js ===
+const express = require('express');
+const router = express.Router();
+const reportController = require('../Reports/controller'); 
+
+// Create a new order
+
+router.get('/get-sales/:vendorId', reportController.getTotalSales);
+router.get('/monthly-sales/:vendorId', reportController.getMonthlySales);
+router.get('/orders-counts/:vendorId', reportController.getOrderCounts);
+router.get('/monthly-orders-counts/:vendorId', reportController.getMonthlyOrderCounts);
+
+
+module.exports = router;
+
+
+=== src/modules/Reports/controller.js ===
+const Order = require('../Order/model');  // Adjust the path according to your project structure
+const Vendor = require('../Vendor/model');
+const mongoose = require('mongoose');
+
+exports.getTotalSales = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        // Prepare the aggregation pipeline
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
+        const calculateSales = async (startDate) => {
+            const sales = await Order.aggregate([
+                { $match: { createdAt: { $gte: startDate } } },
+                ...pipeline,
+                { $unwind: '$vendors.products' },
+                {
+                    $group: {
+                        _id: null,
+                        totalSales: { $sum: '$vendors.products.totalAmount' },
+                    },
+                },
+            ]);
+
+            return sales.length > 0 ? sales[0].totalSales : 0;
+        };
+
+        const totalSalesToday = (await calculateSales(startOfDay)).toFixed(2);
+        const totalSalesThisWeek = (await calculateSales(startOfWeek)).toFixed(2);
+        const totalSalesThisMonth = (await calculateSales(startOfMonth)).toFixed(2);
+
+        res.json({
+            totalSalesToday,
+            totalSalesThisWeek,
+            totalSalesThisMonth,
+        });
+    } catch (error) {
+        res.status(500).send('Server Error');
+    }
+};
+
+exports.getMonthlySales = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+        const now = new Date();
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+
+        // Prepare the aggregation pipeline
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
+
+        const salesData = await Order.aggregate([
+            { $match: { createdAt: { $gte: startOfYear } } },
+            ...pipeline,
+            { $unwind: '$vendors.products' },
+            {
+                $group: {
+                    _id: { $month: "$createdAt" },
+                    totalSales: { $sum: '$vendors.products.totalAmount' }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const monthlySales = Array(12).fill(0);
+        salesData.forEach(sale => {
+            monthlySales[sale._id - 1] = parseFloat(sale.totalSales.toFixed(2));
+        });
+
+        res.json({
+            labels: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+            data: monthlySales
+        });
+    } catch (error) {
+        console.error('Error fetching monthly sales data', error);
+        res.status(500).send('Server Error');
+    }
+};
+
+
+exports.getOrderCounts = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        // Prepare the aggregation pipeline
+        const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
+        const calculateOrderCount = async (startDate) => {
+            const orderCount = await Order.aggregate([
+                { $match: { createdAt: { $gte: startDate } } },
+                ...pipeline,
+                {
+                    $group: {
+                        _id: null,
+                        count: { $sum: 1 }
+                    }
+                }
+            ]);
+
+            return orderCount.length > 0 ? orderCount[0].count : 0;
+        };
+
+        const ordersToday = await calculateOrderCount(startOfDay);
+        const ordersThisWeek = await calculateOrderCount(startOfWeek);
+        const ordersThisMonth = await calculateOrderCount(startOfMonth);
+
+        res.json({
+            ordersToday,
+            ordersThisWeek,
+            ordersThisMonth
+        });
+    } catch (error) {
+        res.status(500).send('Server Error');
+    }
+};
+
+exports.getMonthlyOrderCounts = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId(req.params.vendorId);
+        // Fetch the vendor's role using the vendorId
+        const vendor = await Vendor.findById(vendorId).select('role');
+
+        if (!vendor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Vendor not found'
+            });
+        }
+        const now = new Date();
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+         // Prepare the aggregation pipeline
+         const pipeline = [
+            { $unwind: "$vendors" }
+        ];
+
+        // Include the $match stage only if the vendor's role is not 'admin'
+        if (vendor.role !== 'admin') {
+            pipeline.push({ $match: { "vendors.vendor": vendorId } });
+        }
+
+        const orderData = await Order.aggregate([
+            { $match: { createdAt: { $gte: startOfYear } } },
+            ...pipeline,
+            {
+                $group: {
+                    _id: { $month: "$createdAt" },
+                    orderCount: { $sum: 1 }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const monthlyOrderCounts = Array(12).fill(0);
+        orderData.forEach(order => {
+            monthlyOrderCounts[order._id - 1] = order.orderCount;
+        });
+
+        res.json({
+            labels: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+            data: monthlyOrderCounts
+        });
+    } catch (error) {
+        console.error('Error fetching monthly order counts', error);
+        res.status(500).send('Server Error');
+    }
+};
+
+
+
