@@ -7,7 +7,7 @@ const handleS3Upload = require("../Middleware/s3UploadHandler");
 
 // Define the S3 folder name for vendor documents
 const S3_FOLDER = "vendor-documents";
-
+//
 // Route to create a new vendor
 router.post(
   "/signup",
