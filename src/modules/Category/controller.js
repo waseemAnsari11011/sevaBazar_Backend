@@ -1,26 +1,16 @@
-const Category = require("./model"); // Adjust the path as necessary
-const fs = require("fs");
-const path = require("path");
-const { deleteS3Objects } = require("../Middleware/s3DeleteUtil");
+const Category = require("./model");
+const {
+  deleteS3Objects,
+  extractS3KeyFromUrl,
+} = require("../Middleware/s3DeleteUtil"); // Assuming s3DeleteUtil exists
 
-// Controller function to add a new category
 exports.addCategory = async (req, res) => {
   try {
     const { name } = req.body;
-
-    // Get S3 URLs from uploaded files
+    // Get S3 URLs from uploaded files. Multer populates req.files as an array.
     const images = req.files ? req.files.map((file) => file.location) : [];
-
-    // Create a new category instance
-    const newCategory = new Category({
-      name,
-      images,
-    });
-
-    // Save the category to the database
+    const newCategory = new Category({ name, images });
     const savedCategory = await newCategory.save();
-
-    // Send response
     res.status(201).json({
       message: "Category created successfully",
       category: savedCategory,
@@ -34,68 +24,48 @@ exports.addCategory = async (req, res) => {
   }
 };
 
-// Controller function to update an existing category
+// ✅ CORRECTED UPDATE LOGIC
 exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, existingImages } = req.body;
-
-    // Find the category by ID
+    const { name } = req.body;
     const category = await Category.findById(id);
 
     if (!category) {
-      return res.status(404).json({
-        message: "Category not found",
-      });
+      return res.status(404).json({ message: "Category not found" });
     }
 
-    // Parse existingImages if it's a string (from form data)
-    let parsedExistingImages = [];
-    if (existingImages) {
-      try {
-        parsedExistingImages =
-          typeof existingImages === "string"
-            ? JSON.parse(existingImages)
-            : existingImages;
-      } catch (parseError) {
-        console.error("Error parsing existingImages:", parseError);
-        return res.status(400).json({
-          message: "Invalid existingImages format",
-          error: parseError.message,
-        });
-      }
+    // Directly use req.body.existingImages, ensuring it's an array.
+    let existingImages = req.body.existingImages || [];
+    if (typeof existingImages === "string") {
+      existingImages = [existingImages];
     }
 
-    // Find images to delete from S3 (images that are not in existingImages)
+    // Find images to delete from S3
     const imagesToDelete = category.images.filter(
-      (imagePath) => !parsedExistingImages.includes(imagePath)
+      (imagePath) => !existingImages.includes(imagePath)
     );
 
     // Delete removed images from S3
     if (imagesToDelete.length > 0) {
-      try {
-        await deleteS3Objects(imagesToDelete);
-        console.log("Successfully deleted images from S3:", imagesToDelete);
-      } catch (deleteError) {
-        console.error("Failed to delete some images from S3:", deleteError);
-        // Continue with the update even if S3 deletion fails
-        // You might want to log this for manual cleanup later
+      // Extract keys from full URLs before deleting
+      const s3KeysToDelete = imagesToDelete
+        .map((url) => extractS3KeyFromUrl(url))
+        .filter((key) => key);
+      if (s3KeysToDelete.length > 0) {
+        await deleteS3Objects(s3KeysToDelete);
       }
     }
 
-    // Update the category details
-    category.name = name || category.name;
-
-    // Get new uploaded images (S3 URLs)
+    // Get new uploaded image URLs
     const newImages = req.files ? req.files.map((file) => file.location) : [];
 
-    // Combine existing images and new uploaded images
-    category.images = parsedExistingImages.concat(newImages);
+    // Update category details
+    category.name = name || category.name;
+    category.images = [...existingImages, ...newImages]; // Combine kept images with new ones
 
-    // Save the updated category to the database
     const updatedCategory = await category.save();
 
-    // Send response
     res.status(200).json({
       message: "Category updated successfully",
       category: updatedCategory,
@@ -108,7 +78,6 @@ exports.updateCategory = async (req, res) => {
     });
   }
 };
-
 // Controller function to get all categories
 exports.getAllCategory = async (req, res) => {
   try {

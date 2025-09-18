@@ -1,26 +1,25 @@
-// src/modules/Category/route.js
 const express = require("express");
 const router = express.Router();
 const categoryController = require("./controller");
-const handleS3Upload = require("../Middleware/s3UploadHandler"); // Updated import
-const authenticateToken = require("../Middleware/authMiddleware");
-const authorizeAdmin = require("../Middleware/authorizeMiddleware");
+const handleS3Upload = require("../Middleware/s3UploadHandler");
 
-// Define the S3 folder name for categories
 const S3_FOLDER = "category";
+const FILE_FIELD_NAME = "images"; // Define the field name
 
-// Route to add a new Category with S3 file upload middleware
 router.post(
   "/category",
-  handleS3Upload(S3_FOLDER),
+  // ✅ FIX: Explicitly tell middleware which field to process
+  handleS3Upload(S3_FOLDER, FILE_FIELD_NAME),
   categoryController.addCategory
 );
 
 router.put(
   "/category/:id",
-  handleS3Upload(S3_FOLDER),
+  // ✅ FIX: Explicitly tell middleware which field to process
+  handleS3Upload(S3_FOLDER, FILE_FIELD_NAME),
   categoryController.updateCategory
 );
+
 router.delete("/category/:id", categoryController.deleteCategory);
 router.get("/category", categoryController.getAllCategory);
 router.get("/category/:id", categoryController.getCategoryById);

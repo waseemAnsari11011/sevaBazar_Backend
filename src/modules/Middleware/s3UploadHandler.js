@@ -1,8 +1,9 @@
 // src/modules/Middleware/s3UploadHandler.js
 const createS3Upload = require("./s3UploadMiddleware");
 
-const handleS3Upload = (folderName) => (req, res, next) => {
-  const s3UploadMiddleware = createS3Upload(folderName);
+const handleS3Upload = (folderName, config) => (req, res, next) => {
+  // createS3Upload now handles the logic
+  const s3UploadMiddleware = createS3Upload(folderName, config);
 
   s3UploadMiddleware(req, res, (err) => {
     if (err) {

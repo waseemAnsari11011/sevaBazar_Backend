@@ -3,9 +3,21 @@ const router = express.Router();
 const vendorController = require("./controller");
 const authorizeAdmin = require("../Middleware/authorizeMiddleware");
 const authenticateToken = require("../Middleware/authMiddleware");
+const handleS3Upload = require("../Middleware/s3UploadHandler");
+
+// Define the S3 folder name for vendor documents
+const S3_FOLDER = "vendor-documents";
 
 // Route to create a new vendor
-router.post("/signup", vendorController.createVendor);
+router.post(
+  "/signup",
+  handleS3Upload(S3_FOLDER, [
+    { name: "shopPhoto", maxCount: 1 },
+    { name: "selfiePhoto", maxCount: 1 },
+    { name: "aadharDocument", maxCount: 1 },
+  ]),
+  vendorController.createVendor
+);
 
 // Route to get all vendors
 router.get(

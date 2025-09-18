@@ -5,45 +5,104 @@ const jwt = require("jsonwebtoken");
 require("dotenv").config();
 const secret = process.env.JWT_SECRET;
 
-// Controller function to create a new vendor
 exports.createVendor = async (req, res) => {
   try {
+    // Parse JSON strings from form data
+    let vendorInfo, location, placeId;
+
+    try {
+      vendorInfo = req.body.vendorInfo ? JSON.parse(req.body.vendorInfo) : {};
+      location = req.body.location ? JSON.parse(req.body.location) : {};
+      placeId = req.body.placeId;
+    } catch (parseError) {
+      return res.status(400).json({
+        message: "Invalid JSON format in request body",
+        error: parseError.message,
+      });
+    }
+
+    // Validate required files
+    if (
+      !req.files ||
+      !req.files.shopPhoto ||
+      !req.files.selfiePhoto ||
+      !req.files.aadharDocument
+    ) {
+      return res.status(400).json({
+        message:
+          "All required documents must be uploaded (shop photo, selfie, and Aadhar document)",
+      });
+    }
+
+    // Get S3 URLs from uploaded files
+    const shopPhotoUrl = req.files.shopPhoto[0].location;
+    const selfiePhotoUrl = req.files.selfiePhoto[0].location;
+    const aadharDocumentUrl = req.files.aadharDocument[0].location;
+
     // Hash the password
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
 
-    // 👇 MODIFIED: Build the location object, now including the address
-    // The request body should now send address details inside the location object.
-    const location = req.body.location
+    // Build the location object
+    const locationData = location
       ? {
           type: "Point",
-          coordinates: req.body.location.coordinates, // [lng, lat]
-          address: req.body.location.address, // Address is now nested here
+          coordinates: location.coordinates || [], // [lng, lat]
+          address: location.address || {},
         }
       : undefined;
 
-    // Create a new vendor with the hashed password
+    // Create a new vendor with the hashed password and document URLs
     const newVendor = new Vendor({
       name: req.body.name,
       password: hashedPassword,
       email: req.body.email,
-      vendorInfo: req.body.vendorInfo, // This object no longer contains the address
+      vendorInfo: vendorInfo,
       category: req.body.category,
       role: "vendor",
       isOnline: req.body.isOnline ?? true,
       status: req.body.status ?? "online",
-      location, // Assign the newly constructed location object
+      location: locationData,
+      documents: {
+        shopPhoto: shopPhotoUrl,
+        selfiePhoto: selfiePhotoUrl,
+        aadharDocument: aadharDocumentUrl,
+      },
+      ...(placeId && { placeId }),
     });
 
     // Save the new vendor to the database
     await newVendor.save();
 
+    // Remove password from response
+    const vendorResponse = newVendor.toObject();
+    delete vendorResponse.password;
+
     res.status(201).json({
       message: "Vendor registered successfully",
-      vendor: newVendor,
+      vendor: vendorResponse,
     });
   } catch (error) {
-    console.error("error===>>", error);
-    res.status(400).json({
+    console.error("Create Vendor Error:", error);
+
+    // Handle duplicate email error
+    if (error.code === 11000 && error.keyPattern?.email) {
+      return res.status(400).json({
+        message: "Email already exists. Please use a different email address.",
+      });
+    }
+
+    // Handle validation errors
+    if (error.name === "ValidationError") {
+      const validationErrors = Object.values(error.errors).map(
+        (err) => err.message
+      );
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: validationErrors,
+      });
+    }
+
+    res.status(500).json({
       message: "Failed to register vendor",
       error: error.message,
     });

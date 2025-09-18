@@ -30,6 +30,22 @@ const vendorSchema = new Schema({
     },
   },
 
+  // Image uploads
+  documents: {
+    shopPhoto: {
+      type: String, // S3 URL
+      required: true,
+    },
+    selfiePhoto: {
+      type: String, // S3 URL
+      required: true,
+    },
+    aadharDocument: {
+      type: String, // S3 URL
+      required: true,
+    },
+  },
+
   isOnline: {
     type: Boolean,
     default: true,

@@ -1,9 +1,59 @@
 const Product = require("./model"); // Adjust the path as necessary
-const fs = require("fs");
-const path = require("path");
 const mongoose = require("mongoose");
 const Category = require("../Category/model");
+const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 
+// Configure AWS S3 Client
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+// Helper function to delete S3 objects
+const deleteS3Object = async (key) => {
+  try {
+    const deleteParams = {
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: key,
+    };
+    await s3Client.send(new DeleteObjectCommand(deleteParams));
+    console.log(`Successfully deleted ${key} from S3`);
+  } catch (error) {
+    console.error(`Failed to delete ${key} from S3:`, error);
+  }
+};
+
+// Helper function to extract S3 key from URL
+const extractS3KeyFromUrl = (url) => {
+  if (typeof url !== "string") return null;
+
+  // If it's already a key (starts with folder name)
+  if (url.startsWith("products/")) {
+    return url;
+  }
+
+  // If it's a full S3 URL, extract the key
+  const bucketName = process.env.AWS_S3_BUCKET_NAME;
+  const patterns = [
+    `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/`,
+    `https://${bucketName}.s3.amazonaws.com/`,
+    `https://s3.${process.env.AWS_REGION}.amazonaws.com/${bucketName}/`,
+    `https://s3.amazonaws.com/${bucketName}/`,
+  ];
+
+  for (const pattern of patterns) {
+    if (url.startsWith(pattern)) {
+      return url.substring(pattern.length);
+    }
+  }
+
+  return null;
+};
+
+// src/modules/Product/controller.js
 // Controller function to add a new product
 exports.addProduct = async (req, res) => {
   try {
@@ -16,10 +66,16 @@ exports.addProduct = async (req, res) => {
       tags,
       isReturnAllowed,
     } = req.body;
-    const images = req.files
+
+    // ✅ FIX: Convert req.files object to a flat array before filtering
+    const allUploadedFiles = req.files ? Object.values(req.files).flat() : [];
+
+    // Extract S3 URLs from uploaded files
+    const images = allUploadedFiles
       .filter((file) => file.fieldname.startsWith("productImage"))
-      .map((file) => file.path);
-    const variationImages = req.files.filter((file) =>
+      .map((file) => file.location); // S3 URL is stored in file.location
+
+    const variationImages = allUploadedFiles.filter((file) =>
       file.fieldname.startsWith("variationImage")
     );
 
@@ -50,13 +106,13 @@ exports.addProduct = async (req, res) => {
     const formattedVariations = variations.map((variation, index) => {
       const formattedVariation = {
         attributes: variation.attributes,
-        price: variation.price ? parseInt(variation.price) : 0, // Convert price to integer
-        discount: variation.discount ? parseInt(variation.discount) : 0, // Convert discount to integer
-        quantity: variation.quantity ? parseInt(variation.quantity) : 0, // Convert quantity to integer
+        price: variation.price ? parseInt(variation.price) : 0,
+        discount: variation.discount ? parseInt(variation.discount) : 0,
+        quantity: variation.quantity ? parseInt(variation.quantity) : 0,
         images: variationImages
           .filter((file) => file.fieldname.includes(`variationImage_${index}`))
-          .map((file) => file.path), // Assign the corresponding images
-        parentVariation: null, // Initialize parentVariation as null,
+          .map((file) => file.location), // S3 URL is stored in file.location
+        parentVariation: null,
       };
 
       if (
@@ -72,9 +128,10 @@ exports.addProduct = async (req, res) => {
           }
           childQuantities[parentIndex] += formattedVariation.quantity;
         } else {
-          return res.status(400).json({
-            message: `Parent variation not found for: ${variation.parentVariation}`,
-          });
+          // This logic might need adjustment if parent variation isn't found
+          console.warn(
+            `Parent variation not found for: ${variation.parentVariation}`
+          );
         }
       }
 
@@ -84,6 +141,7 @@ exports.addProduct = async (req, res) => {
       return createdVariation;
     });
 
+    // Validate child quantities against parent quantities
     for (const parentIndex in childQuantities) {
       if (
         childQuantities[parentIndex] > variationReferences[parentIndex].quantity
@@ -98,7 +156,7 @@ exports.addProduct = async (req, res) => {
     newProduct.price = formattedVariations[0].price;
     newProduct.discount = formattedVariations[0].discount;
     newProduct.quantity = variations.reduce(
-      (sum, variation) => sum + parseInt(variation.quantity),
+      (sum, variation) => sum + (parseInt(variation.quantity, 10) || 0),
       0
     );
 
@@ -117,26 +175,147 @@ exports.addProduct = async (req, res) => {
   }
 };
 
+// ... (rest of your controller file)
+
 // Controller function to update an existing product
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      name,
-      price,
-      discount,
-      description,
-      category,
-      vendor,
-      availableLocalities,
-      tags,
-      isReturnAllowed,
-      variations,
-      existingImages,
-      existingVariationImages,
-    } = req.body;
+    const product = await Product.findById(id);
 
-    console.log("tags-->>", tags);
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // --- 1. Process Request Body ---
+    const { name, description, category, vendor, isReturnAllowed } = req.body;
+
+    // Sanitize array fields from FormData
+    const availableLocalities = Array.isArray(req.body.availableLocalities)
+      ? req.body.availableLocalities
+      : req.body.availableLocalities
+      ? [req.body.availableLocalities]
+      : [];
+
+    const tags = Array.isArray(req.body.tags)
+      ? req.body.tags
+      : req.body.tags
+      ? [req.body.tags]
+      : [];
+
+    const existingImages = Array.isArray(req.body.existingImages)
+      ? req.body.existingImages
+      : req.body.existingImages
+      ? [req.body.existingImages]
+      : [];
+
+    const parsedVariations = JSON.parse(req.body.variations || "[]");
+
+    // --- 2. Process File Uploads ---
+    // ✅ FIX: Convert req.files object to a flat array to handle uploads correctly
+    const allUploadedFiles = req.files ? Object.values(req.files).flat() : [];
+
+    const newProductImages = allUploadedFiles
+      .filter((file) => file.fieldname.startsWith("productImage"))
+      .map((file) => file.location);
+
+    const newVariationImagesMap = new Map();
+    allUploadedFiles
+      .filter((file) => file.fieldname.startsWith("variationImage"))
+      .forEach((file) => {
+        const parts = file.fieldname.split("_");
+        const variationIndex = parseInt(parts[1], 10);
+        if (!newVariationImagesMap.has(variationIndex)) {
+          newVariationImagesMap.set(variationIndex, []);
+        }
+        newVariationImagesMap.get(variationIndex).push(file.location);
+      });
+
+    // --- 3. Manage S3 Image Deletion ---
+    const oldImageUrls = [
+      ...product.images,
+      ...product.variations.flatMap((v) => v.images),
+    ];
+
+    const keptImageUrls = new Set([
+      ...existingImages,
+      ...parsedVariations.flatMap((v) =>
+        v.images.filter((img) => typeof img === "string")
+      ),
+    ]);
+
+    const imagesToDelete = oldImageUrls.filter(
+      (url) => !keptImageUrls.has(url)
+    );
+
+    // Asynchronously delete images from S3
+    for (const imageUrl of imagesToDelete) {
+      const s3Key = extractS3KeyFromUrl(imageUrl);
+      if (s3Key) {
+        await deleteS3Object(s3Key);
+      }
+    }
+
+    // --- 4. Format Variations and Merge Images ---
+    const formattedVariations = parsedVariations.map((variation, index) => {
+      // Combine existing string URLs with new S3 URLs for this variation
+      const existingVarImages = variation.images.filter(
+        (img) => typeof img === "string"
+      );
+      const newVarImages = newVariationImagesMap.get(index) || [];
+
+      return {
+        ...variation,
+        _id: variation._id || new mongoose.Types.ObjectId(), // Ensure new variations get an ID
+        images: [...existingVarImages, ...newVarImages],
+        price: parseInt(variation.price, 10) || 0,
+        discount: parseInt(variation.discount, 10) || 0,
+        quantity: parseInt(variation.quantity, 10) || 0,
+      };
+    });
+
+    // --- 5. Update Product Document ---
+    product.name = name;
+    product.description = description;
+    product.category = category;
+    product.vendor = vendor;
+    product.isReturnAllowed = isReturnAllowed;
+    product.availableLocalities = availableLocalities;
+    product.tags = tags;
+
+    // Combine existing product images with new ones
+    product.images = [...existingImages, ...newProductImages];
+    product.variations = formattedVariations;
+
+    // Recalculate main price/quantity from the first variation
+    if (formattedVariations.length > 0) {
+      product.price = formattedVariations[0].price;
+      product.discount = formattedVariations[0].discount;
+      product.quantity = formattedVariations.reduce(
+        (sum, v) => sum + v.quantity,
+        0
+      );
+    }
+
+    const updatedProduct = await product.save();
+
+    res.status(200).json({
+      message: "Product updated successfully",
+      product: updatedProduct,
+    });
+  } catch (error) {
+    console.error("Failed to update product:", error);
+    res.status(500).json({
+      message: "Failed to update product",
+      error: error.message,
+    });
+  }
+};
+
+// Controller function to delete a product by ID
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
 
     // Find the product by ID
     const product = await Product.findById(id);
@@ -147,166 +326,38 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    // Delete product images from the file system that are not in existingImages
-    product.images.forEach((imagePath) => {
-      if (!existingImages?.includes(imagePath)) {
-        const fullPath = path.join(imagePath); // Adjust the path accordingly
-        fs.unlink(fullPath, (err) => {
-          if (err) {
-            console.error(`Failed to delete image file: ${fullPath}`, err);
-          }
-        });
-      }
-    });
-
-    // Parse and process the variations array
-    const parsedVariations = JSON.parse(variations);
-    const variationMap = {}; // To store parent variations by their attributes
-
-    // First, add all parent variations to the map, generating IDs if they do not exist
-    parsedVariations.forEach((variation) => {
-      if (variation.parentVariation === null) {
-        const key = `${variation.attributes.selected}:${variation.attributes.value}`;
-        variation._id = variation._id
-          ? new mongoose.Types.ObjectId(variation._id)
-          : new mongoose.Types.ObjectId();
-        variationMap[key] = variation._id;
-      }
-    });
-
-    // Validate and structure the variations array
-    const formattedVariations = parsedVariations.map((variation) => {
-      let parentVariationId = null;
-      if (
-        variation.parentVariation &&
-        !mongoose.Types.ObjectId.isValid(variation.parentVariation)
-      ) {
-        const parentAttr = variation.parentVariation.split(" - ");
-        if (parentAttr.length === 2) {
-          const parentAttr1 = parentAttr[1].split(": ");
-          const key = `${parentAttr1[0]}:${parentAttr1[1]}`;
-          parentVariationId = variationMap[key];
-        }
-      } else {
-        parentVariationId = variation.parentVariation
-          ? new mongoose.Types.ObjectId(variation.parentVariation)
-          : null;
-      }
-
-      return {
-        attributes: variation.attributes,
-        price: variation.price ? parseInt(variation.price) : 0,
-        discount: variation.discount ? parseInt(variation.discount) : 0,
-        quantity: variation.quantity ? parseInt(variation.quantity) : 0,
-        parentVariation: parentVariationId
-          ? new mongoose.Types.ObjectId(parentVariationId)
-          : null,
-        _id: variation._id
-          ? new mongoose.Types.ObjectId(variation._id)
-          : new mongoose.Types.ObjectId(),
-        images: [],
-      };
-    });
-
-    // Calculate total quantity and validate child quantities
-    const parentQuantities = {};
-    formattedVariations.forEach((variation) => {
-      if (variation.parentVariation) {
-        const parentId = variation.parentVariation.toString();
-        if (!parentQuantities[parentId]) {
-          parentQuantities[parentId] = 0;
-        }
-        parentQuantities[parentId] += variation.quantity;
-      }
-    });
-
-    // Check if any child quantities exceed their parent quantities
-    for (const [parentId, totalChildQuantity] of Object.entries(
-      parentQuantities
-    )) {
-      const parentVariation = formattedVariations.find(
-        (variation) => variation._id.toString() === parentId
-      );
-      if (parentVariation && totalChildQuantity > parentVariation.quantity) {
-        return res.status(400).json({
-          message: `Total quantity of child variations (${totalChildQuantity}) exceeds parent variation quantity (${parentVariation.quantity}) for parent variation ID: ${parentId}`,
-        });
+    // Delete product images from S3
+    for (const imagePath of product.images) {
+      const s3Key = extractS3KeyFromUrl(imagePath);
+      if (s3Key) {
+        await deleteS3Object(s3Key);
       }
     }
 
-    // Calculate total quantity for the product
-    const totalQuantity = formattedVariations.reduce((sum, variation) => {
-      if (variation.parentVariation === null) {
-        return sum + variation.quantity;
-      }
-      return sum;
-    }, 0);
-
-    // Update the product details
-    product.name = name || product.name;
-    product.price = price ? parseInt(price) || formattedVariations[0].price : 0;
-    product.discount = parseInt(discount) || formattedVariations[0].discount;
-    product.description = description || product.description;
-    product.category = category || product.category;
-    product.vendor = vendor || product.vendor;
-    product.availableLocalities =
-      availableLocalities || product.availableLocalities;
-    (product.tags = tags ? tags : []),
-      (product.isReturnAllowed = isReturnAllowed || product.isReturnAllowed);
-    product.quantity = totalQuantity;
-
-    console.log("req.files-->>", req.files);
-
-    // Handle new product images and variation images
-    if (req.files && req.files.length > 0) {
-      const newImages = req.files
-        .filter((file) => file.fieldname.startsWith("productImage"))
-        .map((file) => file.path);
-      product.images = existingImages
-        ? existingImages.concat(newImages)
-        : newImages;
-
-      req.files.forEach((file) => {
-        if (file.fieldname.startsWith("variationImage_")) {
-          const [variationIndex, imageIndex] = file.fieldname
-            .split("_")
-            .slice(1)
-            .map(Number);
-          if (formattedVariations[variationIndex]) {
-            formattedVariations[variationIndex].images[imageIndex] = file.path;
+    // Delete variation images from S3
+    for (const variation of product.variations) {
+      if (variation.images && variation.images.length > 0) {
+        for (const imagePath of variation.images) {
+          const s3Key = extractS3KeyFromUrl(imagePath);
+          if (s3Key) {
+            await deleteS3Object(s3Key);
           }
         }
-      });
-    } else {
-      product.images = existingImages || product.images;
+      }
     }
 
-    // Handle existing variation images
-    if (existingVariationImages) {
-      existingVariationImages.forEach((imageList, variationIndex) => {
-        if (formattedVariations[variationIndex]) {
-          imageList.forEach((image, imageIndex) => {
-            formattedVariations[variationIndex].images[imageIndex] = image;
-          });
-        }
-      });
-    }
+    // Delete the product from the database
+    const deletedProduct = await Product.findByIdAndDelete(id);
 
-    // Update variations
-    product.variations = formattedVariations;
-
-    // Save the updated product to the database
-    const updatedProduct = await product.save();
-
-    // Send response
+    // Send response confirming deletion
     res.status(200).json({
-      message: "Product updated successfully",
-      product: updatedProduct,
+      message: "Product deleted successfully",
+      product: deletedProduct,
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({
-      message: "Failed to update product",
+      message: "Failed to delete product",
       error: error.message,
     });
   }
@@ -399,47 +450,6 @@ exports.getProductById = async (req, res) => {
     console.error(error);
     res.status(500).json({
       message: "Failed to retrieve product",
-      error: error.message,
-    });
-  }
-};
-
-// Controller function to delete a product by ID
-exports.deleteProduct = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Find the product by ID
-    const product = await Product.findById(id);
-
-    if (!product) {
-      return res.status(404).json({
-        message: "Product not found",
-      });
-    }
-
-    // Delete product images from the file system
-    product.images.forEach((imagePath) => {
-      const fullPath = path.join(imagePath);
-      fs.unlink(fullPath, (err) => {
-        if (err) {
-          console.error(`Failed to delete image file: ${fullPath}`, err);
-        }
-      });
-    });
-
-    // Delete the product from the database
-    const deletedProduct = await Product.findByIdAndDelete(id);
-
-    // Send response confirming deletion
-    res.status(200).json({
-      message: "Product deleted successfully",
-      product: deletedProduct,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      message: "Failed to delete product",
       error: error.message,
     });
   }

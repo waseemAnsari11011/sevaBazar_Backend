@@ -1,17 +1,39 @@
 const express = require("express");
 const router = express.Router();
-const upload = require("../Middleware/uploadHandler"); // Adjust the path as necessary
 const productController = require("./controller"); // Adjust the path as necessary
+const handleS3Upload = require("../Middleware/s3UploadHandler");
+
+// Define dynamic fields for S3 upload
+const getProductUploadFields = () => {
+  const fields = [];
+
+  // Product images (up to 10 images)
+  for (let i = 0; i < 10; i++) {
+    fields.push({ name: `productImage_${i}`, maxCount: 1 });
+  }
+
+  // Variation images (up to 50 variations, 5 images each)
+  for (let variationIndex = 0; variationIndex < 50; variationIndex++) {
+    for (let imageIndex = 0; imageIndex < 5; imageIndex++) {
+      fields.push({
+        name: `variationImage_${variationIndex}_${imageIndex}`,
+        maxCount: 1,
+      });
+    }
+  }
+
+  return fields;
+};
 
 // Route to add a new product with file upload middleware
 router.post(
   "/products",
-  upload("uploads/products"),
+  handleS3Upload("products", getProductUploadFields()),
   productController.addProduct
 );
 router.put(
   "/products/:id",
-  upload("uploads/products"),
+  handleS3Upload("products", getProductUploadFields()),
   productController.updateProduct
 );
 router.delete("/products/:id", productController.deleteProduct);
