@@ -12,7 +12,7 @@ exports.createVendor = async (req, res) => {
 
     try {
       vendorInfo = req.body.vendorInfo ? JSON.parse(req.body.vendorInfo) : {};
-      location = req.body.location ? JSON.parse(req.body.location) : {};
+      location = req.body.location ? JSON.parse(req.body.location) : {}; // This now contains the correct structure
       placeId = req.body.placeId;
     } catch (parseError) {
       return res.status(400).json({
@@ -47,7 +47,9 @@ exports.createVendor = async (req, res) => {
       ? {
           type: "Point",
           coordinates: location.coordinates || [], // [lng, lat]
-          address: location.address || {},
+          address: {
+            ...location.address,
+          },
         }
       : undefined;
 

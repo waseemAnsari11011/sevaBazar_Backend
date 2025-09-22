@@ -84,6 +84,10 @@ const vendorSchema = new Schema({
       postalCode: {
         type: String,
       },
+      postalCodes: {
+        // Add this field
+        type: [String],
+      },
     },
   },
 
