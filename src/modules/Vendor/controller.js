@@ -26,18 +26,20 @@ exports.createVendor = async (req, res) => {
       !req.files ||
       !req.files.shopPhoto ||
       !req.files.selfiePhoto ||
-      !req.files.aadharDocument
+      !req.files.aadharFrontDocument ||
+      !req.files.aadharBackDocument
     ) {
       return res.status(400).json({
         message:
-          "All required documents must be uploaded (shop photo, selfie, and Aadhar document)",
+          "All required documents must be uploaded (shop photo, selfie, and Aadhar/PAN document)",
       });
     }
 
     // Get S3 URLs from uploaded files
     const shopPhotoUrl = req.files.shopPhoto[0].location;
     const selfiePhotoUrl = req.files.selfiePhoto[0].location;
-    const aadharDocumentUrl = req.files.aadharDocument[0].location;
+    const aadharFrontDocumentUrl = req.files.aadharFrontDocument[0].location;
+    const aadharBackDocumentUrl = req.files.aadharBackDocument[0].location;
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
@@ -67,7 +69,8 @@ exports.createVendor = async (req, res) => {
       documents: {
         shopPhoto: shopPhotoUrl,
         selfiePhoto: selfiePhotoUrl,
-        aadharDocument: aadharDocumentUrl,
+        aadharFrontDocument: aadharFrontDocumentUrl,
+        aadharBackDocument: aadharBackDocumentUrl,
       },
       ...(placeId && { placeId }),
     });

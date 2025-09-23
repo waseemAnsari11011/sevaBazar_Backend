@@ -39,7 +39,11 @@ const vendorSchema = new Schema({
       type: String, // S3 URL
       required: true,
     },
-    aadharDocument: {
+    aadharFrontDocument: {
+      type: String, // S3 URL
+      required: true,
+    },
+    aadharBackDocument: {
       type: String, // S3 URL
       required: true,
     },

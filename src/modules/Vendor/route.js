@@ -14,7 +14,8 @@ router.post(
   handleS3Upload(S3_FOLDER, [
     { name: "shopPhoto", maxCount: 1 },
     { name: "selfiePhoto", maxCount: 1 },
-    { name: "aadharDocument", maxCount: 1 },
+    { name: "aadharFrontDocument", maxCount: 1 }, // Corrected field name
+    { name: "aadharBackDocument", maxCount: 1 }, // Corrected field name
   ]),
   vendorController.createVendor
 );
