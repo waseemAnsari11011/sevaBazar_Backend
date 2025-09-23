@@ -26,7 +26,6 @@ const vendorSchema = new Schema({
     },
     alternativeContactNumber: {
       type: String,
-      required: true,
     },
   },
 
@@ -72,6 +71,7 @@ const vendorSchema = new Schema({
         type: String,
       },
       addressLine2: String,
+      landmark: String, // Add landmark field
       city: {
         type: String,
       },
