@@ -16,6 +16,7 @@ router.post(
     { name: "selfiePhoto", maxCount: 1 },
     { name: "aadharFrontDocument", maxCount: 1 }, // Corrected field name
     { name: "aadharBackDocument", maxCount: 1 }, // Corrected field name
+    { name: "panCardDocument", maxCount: 1 },
   ]),
   vendorController.createVendor
 );

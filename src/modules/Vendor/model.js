@@ -41,11 +41,12 @@ const vendorSchema = new Schema({
     },
     aadharFrontDocument: {
       type: String, // S3 URL
-      required: true,
     },
     aadharBackDocument: {
       type: String, // S3 URL
-      required: true,
+    },
+    panCardDocument: {
+      type: String, //S3 URL
     },
   },
 

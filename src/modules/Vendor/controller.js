@@ -22,13 +22,7 @@ exports.createVendor = async (req, res) => {
     }
 
     // Validate required files
-    if (
-      !req.files ||
-      !req.files.shopPhoto ||
-      !req.files.selfiePhoto ||
-      !req.files.aadharFrontDocument ||
-      !req.files.aadharBackDocument
-    ) {
+    if (!req.files || !req.files.shopPhoto || !req.files.selfiePhoto) {
       return res.status(400).json({
         message:
           "All required documents must be uploaded (shop photo, selfie, and Aadhar/PAN document)",
@@ -38,8 +32,15 @@ exports.createVendor = async (req, res) => {
     // Get S3 URLs from uploaded files
     const shopPhotoUrl = req.files.shopPhoto[0].location;
     const selfiePhotoUrl = req.files.selfiePhoto[0].location;
-    const aadharFrontDocumentUrl = req.files.aadharFrontDocument[0].location;
-    const aadharBackDocumentUrl = req.files.aadharBackDocument[0].location;
+    const aadharFrontDocumentUrl = req.files.aadharFrontDocument
+      ? req.files.aadharFrontDocument[0].location
+      : null;
+    const aadharBackDocumentUrl = req.files.aadharBackDocument
+      ? req.files.aadharBackDocument[0].location
+      : null;
+    const panCardDocumentUrl = req.files.panCardDocument
+      ? req.files.panCardDocument[0].location
+      : null;
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
@@ -71,6 +72,7 @@ exports.createVendor = async (req, res) => {
         selfiePhoto: selfiePhotoUrl,
         aadharFrontDocument: aadharFrontDocumentUrl,
         aadharBackDocument: aadharBackDocumentUrl,
+        panCardDocument: panCardDocumentUrl,
       },
       ...(placeId && { placeId }),
     });
