@@ -15,6 +15,7 @@ const vendorSchema = new Schema({
     type: String,
     required: true,
     unique: true,
+    index: true,
   },
   vendorInfo: {
     businessName: {
@@ -23,6 +24,8 @@ const vendorSchema = new Schema({
     contactNumber: {
       type: String,
       required: true,
+      index: true,
+      unique: true,
     },
     alternativeContactNumber: {
       type: String,

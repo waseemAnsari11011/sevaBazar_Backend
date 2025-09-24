@@ -21,6 +21,29 @@ exports.createVendor = async (req, res) => {
       });
     }
 
+    // Check for existing vendor with the same email or phone number
+    const existingVendor = await Vendor.findOne({
+      $or: [
+        { email: req.body.email },
+        { "vendorInfo.contactNumber": vendorInfo.contactNumber },
+      ],
+    });
+
+    if (existingVendor) {
+      if (existingVendor.email === req.body.email) {
+        return res
+          .status(409)
+          .json({ message: "Vendor with this email already exists" });
+      }
+      if (
+        existingVendor.vendorInfo.contactNumber === vendorInfo.contactNumber
+      ) {
+        return res
+          .status(409)
+          .json({ message: "Vendor with this phone number already exists" });
+      }
+    }
+
     // Validate required files
     if (!req.files || !req.files.shopPhoto || !req.files.selfiePhoto) {
       return res.status(400).json({
@@ -91,11 +114,20 @@ exports.createVendor = async (req, res) => {
   } catch (error) {
     console.error("Create Vendor Error:", error);
 
-    // Handle duplicate email error
-    if (error.code === 11000 && error.keyPattern?.email) {
-      return res.status(400).json({
-        message: "Email already exists. Please use a different email address.",
-      });
+    // Handle duplicate key errors (for email and phone number)
+    if (error.code === 11000) {
+      if (error.keyPattern?.email) {
+        return res.status(409).json({
+          message:
+            "Email already exists. Please use a different email address.",
+        });
+      }
+      if (error.keyPattern && error.keyPattern["vendorInfo.contactNumber"]) {
+        return res.status(409).json({
+          message:
+            "Phone number already exists. Please use a different phone number.",
+        });
+      }
     }
 
     // Handle validation errors
@@ -225,12 +257,18 @@ exports.deleteVendor = async (req, res) => {
 
 // Controller function for vendor login
 exports.vendorLogin = async (req, res) => {
-  const { email, password } = req.body;
+  const { emailOrPhone, password } = req.body;
 
   try {
-    const vendor = await Vendor.findOne({ email });
+    let vendor = await Vendor.findOne({ email: emailOrPhone });
     if (!vendor) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      vendor = await Vendor.findOne({
+        "vendorInfo.contactNumber": emailOrPhone,
+      });
+    }
+
+    if (!vendor) {
+      return res.status(401).json({ message: "Invalid credentials" });
     }
     if (vendor.isRestricted) {
       return res.status(403).json({
@@ -239,7 +277,7 @@ exports.vendorLogin = async (req, res) => {
     }
     const isPasswordMatch = await vendor.comparePassword(password);
     if (!isPasswordMatch) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
     const token = jwt.sign({ id: vendor._id, role: vendor.role }, secret);
     res
