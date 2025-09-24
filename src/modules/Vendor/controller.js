@@ -413,3 +413,31 @@ exports.getVendorDetails = async (req, res) => {
     res.status(500).json({ message: "Error fetching vendor details", error });
   }
 };
+
+exports.updateVendorAddress = async (req, res) => {
+  const { vendorId } = req.params;
+  const { address, landmark, postalCode, latitude, longitude } = req.body;
+
+  try {
+    const vendor = await Vendor.findById(vendorId);
+
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+
+    vendor.location.address.addressLine1 = address;
+    vendor.location.address.landmark = landmark;
+    vendor.location.address.postalCode = postalCode;
+    vendor.location.coordinates = [longitude, latitude];
+
+    await vendor.save();
+
+    res.status(200).json({
+      message: "Vendor address updated successfully",
+      vendor,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};

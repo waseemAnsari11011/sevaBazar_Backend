@@ -75,4 +75,6 @@ router.get("/search", vendorController.searchVendors);
 // Vendor details
 router.get("/:id/details", vendorController.getVendorDetails);
 
+router.put("/address/:vendorId", vendorController.updateVendorAddress); // New route for updating address
+
 module.exports = router;
