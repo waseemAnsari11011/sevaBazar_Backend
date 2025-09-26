@@ -151,13 +151,12 @@ exports.createVendor = async (req, res) => {
 // Controller function to update a vendor by ID
 exports.updateVendor = async (req, res) => {
   const updates = Object.keys(req.body);
-  // 👇 MODIFIED: Updated the list of allowed fields for modification
   const allowedUpdates = [
     "name",
     "email",
     "password",
     "vendorInfo",
-    "location", // 'location' is now an allowed update
+    "location",
     "category",
     "isOnline",
     "status",
@@ -176,16 +175,16 @@ exports.updateVendor = async (req, res) => {
       return res.status(404).send();
     }
 
-    // Handle password update separately to ensure it's hashed
     if (updates.includes("password")) {
       req.body.password = await bcrypt.hash(req.body.password, 10);
     }
 
     updates.forEach((update) => (vendor[update] = req.body[update]));
-    vendor.updatedAt = Date.now(); // Update the timestamp
+    vendor.updatedAt = Date.now();
     await vendor.save();
 
-    res.status(200).send(vendor);
+    // 👇 CHANGE HERE: Wrap the response in a 'vendor' object
+    res.status(200).send({ vendor });
   } catch (error) {
     res.status(400).send(error);
   }
@@ -231,14 +230,19 @@ exports.getAllVendors = async (req, res) => {
 
 // Controller function to get a vendor by ID
 exports.getVendorById = async (req, res) => {
+  const { vendorId } = req.params;
+
   try {
-    const vendor = await Vendor.findById(req.params.id);
+    const vendor = await Vendor.findById(vendorId);
+
     if (!vendor) {
-      return res.status(404).send();
+      return res.status(404).json({ message: "Vendor not found" });
     }
-    res.status(200).send(vendor);
+
+    res.status(200).json({ vendor });
   } catch (error) {
-    res.status(500).send(error);
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 

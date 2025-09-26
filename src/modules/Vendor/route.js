@@ -29,8 +29,7 @@ router.get(
   vendorController.getAllVendors
 );
 
-// Route to get a vendor by ID
-router.get("/:id", vendorController.getVendorById);
+router.get("/:vendorId", vendorController.getVendorById); // New route to get vendor by ID
 
 // Route to update a vendor by ID
 router.put("/:id", vendorController.updateVendor);
