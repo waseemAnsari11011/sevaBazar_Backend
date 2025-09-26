@@ -76,4 +76,12 @@ router.get("/:id/details", vendorController.getVendorDetails);
 
 router.put("/address/:vendorId", vendorController.updateVendorAddress); // New route for updating address
 
+// Route to get a vendor by ID (for admin)
+router.get(
+  "/:vendorId",
+  authenticateToken,
+  authorizeAdmin,
+  vendorController.getVendorById
+);
+
 module.exports = router;

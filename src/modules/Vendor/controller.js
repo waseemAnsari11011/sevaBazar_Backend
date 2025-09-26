@@ -230,19 +230,26 @@ exports.getAllVendors = async (req, res) => {
 
 // Controller function to get a vendor by ID
 exports.getVendorById = async (req, res) => {
-  const { vendorId } = req.params;
-
   try {
-    const vendor = await Vendor.findById(vendorId);
+    const vendorId = req.params.vendorId;
+    // Find the vendor by their ID and populate the category field
+    const vendor = await Vendor.findById(vendorId).populate("category", "name");
 
     if (!vendor) {
       return res.status(404).json({ message: "Vendor not found" });
     }
 
-    res.status(200).json({ vendor });
+    // Return the vendor's details
+    res.status(200).json({
+      message: "Vendor details fetched successfully",
+      vendor: vendor,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Get Vendor by ID Error:", error);
+    res.status(500).json({
+      message: "Failed to fetch vendor details",
+      error: error.message,
+    });
   }
 };
 
