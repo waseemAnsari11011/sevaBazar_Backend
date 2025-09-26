@@ -53,7 +53,7 @@ exports.createVendor = async (req, res) => {
     }
 
     // Get S3 URLs from uploaded files
-    const shopPhotoUrl = req.files.shopPhoto[0].location;
+    const shopPhotoUrls = req.files.shopPhoto.map((file) => file.location);
     const selfiePhotoUrl = req.files.selfiePhoto[0].location;
     const aadharFrontDocumentUrl = req.files.aadharFrontDocument
       ? req.files.aadharFrontDocument[0].location
@@ -91,7 +91,7 @@ exports.createVendor = async (req, res) => {
       status: req.body.status ?? "online",
       location: locationData,
       documents: {
-        shopPhoto: shopPhotoUrl,
+        shopPhoto: shopPhotoUrls,
         selfiePhoto: selfiePhotoUrl,
         aadharFrontDocument: aadharFrontDocumentUrl,
         aadharBackDocument: aadharBackDocumentUrl,

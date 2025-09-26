@@ -34,10 +34,11 @@ const vendorSchema = new Schema({
 
   // Image uploads
   documents: {
-    shopPhoto: {
-      type: String, // S3 URL
-      required: true,
-    },
+    shopPhoto: [
+      {
+        type: String, // S3 URL
+      },
+    ],
     selfiePhoto: {
       type: String, // S3 URL
       required: true,

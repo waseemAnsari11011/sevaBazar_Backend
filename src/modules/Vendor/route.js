@@ -12,7 +12,7 @@ const S3_FOLDER = "vendor-documents";
 router.post(
   "/signup",
   handleS3Upload(S3_FOLDER, [
-    { name: "shopPhoto", maxCount: 1 },
+    { name: "shopPhoto", maxCount: 5 }, // Allow up to 5 shop photos
     { name: "selfiePhoto", maxCount: 1 },
     { name: "aadharFrontDocument", maxCount: 1 }, // Corrected field name
     { name: "aadharBackDocument", maxCount: 1 }, // Corrected field name
