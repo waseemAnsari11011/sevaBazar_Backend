@@ -53,7 +53,31 @@ const vendorSchema = new Schema({
       type: String, //S3 URL
     },
   },
-
+  bankDetails: {
+    accountHolderName: {
+      type: String,
+    },
+    accountNumber: {
+      type: String,
+    },
+    ifscCode: {
+      type: String,
+    },
+    bankName: {
+      type: String,
+    },
+  },
+  upiDetails: {
+    upiId: {
+      type: String,
+    },
+    upiPhoneNumber: {
+      type: String,
+    },
+    qrCode: {
+      type: String, // S3 URL for the QR code image
+    },
+  },
   isOnline: {
     type: Boolean,
     default: true,

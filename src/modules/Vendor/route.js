@@ -17,6 +17,7 @@ router.post(
     { name: "aadharFrontDocument", maxCount: 1 }, // Corrected field name
     { name: "aadharBackDocument", maxCount: 1 }, // Corrected field name
     { name: "panCardDocument", maxCount: 1 },
+    { name: "qrCode", maxCount: 1 },
   ]),
   vendorController.createVendor
 );

@@ -8,12 +8,16 @@ const secret = process.env.JWT_SECRET;
 exports.createVendor = async (req, res) => {
   try {
     // Parse JSON strings from form data
-    let vendorInfo, location, placeId;
+    let vendorInfo, location, placeId, bankDetails, upiDetails;
 
     try {
       vendorInfo = req.body.vendorInfo ? JSON.parse(req.body.vendorInfo) : {};
-      location = req.body.location ? JSON.parse(req.body.location) : {}; // This now contains the correct structure
+      location = req.body.location ? JSON.parse(req.body.location) : {};
       placeId = req.body.placeId;
+      bankDetails = req.body.bankDetails
+        ? JSON.parse(req.body.bankDetails)
+        : {};
+      upiDetails = req.body.upiDetails ? JSON.parse(req.body.upiDetails) : {};
     } catch (parseError) {
       return res.status(400).json({
         message: "Invalid JSON format in request body",
@@ -65,6 +69,8 @@ exports.createVendor = async (req, res) => {
       ? req.files.panCardDocument[0].location
       : null;
 
+    const qrCodeUrl = req.files.qrCode ? req.files.qrCode[0].location : null;
+
     // Hash the password
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
 
@@ -96,6 +102,11 @@ exports.createVendor = async (req, res) => {
         aadharFrontDocument: aadharFrontDocumentUrl,
         aadharBackDocument: aadharBackDocumentUrl,
         panCardDocument: panCardDocumentUrl,
+      },
+      bankDetails,
+      upiDetails: {
+        ...upiDetails,
+        qrCode: qrCodeUrl,
       },
       ...(placeId && { placeId }),
     });
