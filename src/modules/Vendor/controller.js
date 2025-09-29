@@ -1,6 +1,8 @@
 const Vendor = require("./model.js");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 
 require("dotenv").config();
 const secret = process.env.JWT_SECRET;
@@ -460,6 +462,85 @@ exports.updateVendorAddress = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Forgot Password
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const vendor = await Vendor.findOne({ email });
+
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+
+    // Generate a reset token
+    const token = crypto.randomBytes(20).toString("hex");
+    vendor.resetPasswordToken = token;
+    vendor.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+
+    await vendor.save();
+
+    console.log("EMAIL:", process.env.EMAIL);
+    console.log("EMAIL_PASSWORD:", process.env.EMAIL_PASSWORD);
+
+    // Create a transporter for sending emails (configure with your email service)
+    const transporter = nodemailer.createTransport({
+      service: "Gmail",
+      auth: {
+        user: process.env.EMAIL,
+        pass: process.env.EMAIL_PASSWORD,
+      },
+    });
+
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
+
+    const mailOptions = {
+      to: vendor.email,
+      from: "passwordreset@demo.com",
+      subject: "Password Reset",
+      text: `You are receiving this because you (or someone else) have requested the reset of the password for your account.\n\n
+        Please click on the following link, or paste this into your browser to complete the process:\n\n
+        ${resetUrl}\n\n
+        If you did not request this, please ignore this email and your password will remain unchanged.\n`,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.status(200).json({ message: "Password reset email sent" });
+  } catch (error) {
+    console.error("Forgot Password Error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Reset Password
+exports.resetPassword = async (req, res) => {
+  try {
+    const vendor = await Vendor.findOne({
+      resetPasswordToken: req.params.token,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!vendor) {
+      return res
+        .status(400)
+        .json({ message: "Password reset token is invalid or has expired." });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
+    vendor.password = hashedPassword;
+    vendor.resetPasswordToken = undefined;
+    vendor.resetPasswordExpires = undefined;
+
+    await vendor.save();
+
+    res.status(200).json({ message: "Password has been reset." });
+  } catch (error) {
+    console.error("Reset Password Error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

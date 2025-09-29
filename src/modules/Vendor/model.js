@@ -138,6 +138,12 @@ const vendorSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  resetPasswordToken: {
+    type: String,
+  },
+  resetPasswordExpires: {
+    type: Date,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

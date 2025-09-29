@@ -85,4 +85,10 @@ router.get(
   vendorController.getVendorById
 );
 
+// Forgot Password
+router.post("/forgot-password", vendorController.forgotPassword);
+
+// Reset Password
+router.post("/reset-password/:token", vendorController.resetPassword);
+
 module.exports = router;
