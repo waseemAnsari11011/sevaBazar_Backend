@@ -3,8 +3,8 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
-const customerRoutes = require("./src/modules/Customer/route"); // Adjust the path as per your project structure
-const vendorRoutes = require("./src/modules/Vendor/route"); // Adjust the path as per your project structure
+const customerRoutes = require("./src/modules/Customer/route");
+const vendorRoutes = require("./src/modules/Vendor/route");
 const ProductRoutes = require("./src/modules/Product/route");
 const CategoryRoutes = require("./src/modules/Category/route");
 const OrderRoutes = require("./src/modules/Order/route");
@@ -22,6 +22,9 @@ const port = process.env.PORT || 3000;
 
 // Middleware to parse JSON bodies
 app.use(express.json());
+
+// Serve static files from the 'build' directory of the frontend
+app.use(express.static(path.join(__dirname, "..", "sevabazar_panel", "build")));
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
@@ -48,6 +51,13 @@ app.use(ContactRoutes);
 app.use(BannerRoutes);
 app.use(ChatOrder);
 app.use(deliveryRoutes);
+
+// For any other route, serve the index.html file
+app.get("*", (req, res) => {
+  res.sendFile(
+    path.join(__dirname, "..", "sevabazar_panel", "build", "index.html")
+  );
+});
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
