@@ -91,4 +91,18 @@ router.post("/forgot-password", vendorController.forgotPassword);
 // Reset Password
 router.post("/reset-password/:token", vendorController.resetPassword);
 
+// Route for admin to login as a vendor
+router.post(
+  "/admin-login-as-vendor/:vendorId",
+  authenticateToken,
+  authorizeAdmin,
+  vendorController.adminLoginAsVendor
+);
+
+// 👇 ADD THIS NEW ROUTE for searching vendors in a category
+router.get(
+  "/vendors/search/:categoryId",
+  vendorController.searchVendorsByCategory
+);
+
 module.exports = router;

@@ -544,3 +544,60 @@ exports.resetPassword = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Controller function for admin to login as a vendor
+exports.adminLoginAsVendor = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    // The authorizeAdmin middleware already confirmed the requester is an admin.
+    const vendorToLogin = await Vendor.findById(vendorId).select("-password");
+
+    if (!vendorToLogin) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+
+    // Generate a token for the specified vendor
+    const token = jwt.sign(
+      { id: vendorToLogin._id, role: vendorToLogin.role },
+      secret
+    );
+
+    // Send the vendor's data and the new token back
+    res.status(200).json({
+      message: "Logged in as vendor successfully",
+      vendor: vendorToLogin,
+      token: token,
+    });
+  } catch (error) {
+    console.error("Admin login as vendor error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// 👇 ADD THIS NEW FUNCTION
+exports.searchVendorsByCategory = async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const { q } = req.query; // q will be our search query, e.g., /search/some-id?q=parlor
+
+    if (!q) {
+      // If search query is empty, return all vendors for the category
+      const vendors = await Vendor.find({ category: categoryId });
+      return res.status(200).json(vendors);
+    }
+
+    const searchQuery = new RegExp(q, "i"); // 'i' for case-insensitive search
+
+    const vendors = await Vendor.find({
+      category: categoryId,
+      $or: [{ "vendorInfo.businessName": searchQuery }, { name: searchQuery }],
+    });
+
+    res.status(200).json(vendors);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Error searching vendors", error: error.message });
+  }
+};
