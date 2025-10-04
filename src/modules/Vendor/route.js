@@ -100,9 +100,6 @@ router.post(
 );
 
 // 👇 ADD THIS NEW ROUTE for searching vendors in a category
-router.get(
-  "/vendors/search/:categoryId",
-  vendorController.searchVendorsByCategory
-);
+router.get("/search/:categoryId", vendorController.searchVendorsByCategory);
 
 module.exports = router;
