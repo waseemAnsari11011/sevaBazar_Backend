@@ -984,3 +984,14 @@ exports.searchVendorProducts = async (req, res) => {
     res.status(500).json({ message: "Error searching vendor products", error });
   }
 };
+
+// Controller function to get products by Vendor ID for public consumption
+exports.getProductsByVendor = async (req, res) => {
+  console.log("it is called!!");
+  try {
+    const products = await Product.find({ vendor: req.params.vendorId });
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

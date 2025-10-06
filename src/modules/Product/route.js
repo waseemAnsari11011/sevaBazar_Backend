@@ -77,4 +77,7 @@ router.post("/makeInActive", productController.makeInActive);
 
 router.get("/search", productController.searchVendorProducts);
 
+// Add the new route to fetch products for a specific vendor in a public context (customer view)
+router.get("/products/vendor/:vendorId", productController.getProductsByVendor);
+
 module.exports = router;
