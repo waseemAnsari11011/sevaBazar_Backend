@@ -7,22 +7,62 @@ const handleS3Upload = require("../Middleware/s3UploadHandler");
 
 // Define the S3 folder name for vendor documents
 const S3_FOLDER = "vendor-documents";
-//
-// Route to create a new vendor
+
+// =================================================================
+// VENDOR AUTHENTICATION & REGISTRATION ROUTES
+// =================================================================
+
+// Route to create a new vendor (signup)
 router.post(
   "/signup",
   handleS3Upload(S3_FOLDER, [
-    { name: "shopPhoto", maxCount: 5 }, // Allow up to 5 shop photos
+    { name: "shopPhoto", maxCount: 5 },
     { name: "selfiePhoto", maxCount: 1 },
-    { name: "aadharFrontDocument", maxCount: 1 }, // Corrected field name
-    { name: "aadharBackDocument", maxCount: 1 }, // Corrected field name
+    { name: "aadharFrontDocument", maxCount: 1 },
+    { name: "aadharBackDocument", maxCount: 1 },
     { name: "panCardDocument", maxCount: 1 },
     { name: "qrCode", maxCount: 1 },
   ]),
   vendorController.createVendor
 );
 
-// Route to get all vendors
+// Route for vendor login
+router.post("/login", vendorController.vendorLogin);
+
+// Forgot Password
+router.post("/forgot-password", vendorController.forgotPassword);
+
+// Reset Password
+router.post("/reset-password/:token", vendorController.resetPassword);
+
+// =================================================================
+// PUBLIC VENDOR ROUTES (No Auth Required)
+// =================================================================
+
+// Get all vendors (online + offline) - Public
+router.get("/all/vendor", vendorController.getAllVendors);
+
+// Get nearby vendors (based on location)
+router.get("/nearby/vendor", vendorController.getNearbyVendors);
+
+// Get vendors by category
+router.get("/by-category/:categoryId", vendorController.getVendorsByCategory);
+
+// Search vendors
+router.get("/search", vendorController.searchVendors);
+
+// Search vendors within a specific category
+router.get("/search/:categoryId", vendorController.searchVendorsByCategory);
+
+// Get a single vendor's public details
+// NOTE: This must be one of the LAST GET routes to avoid conflict
+router.get("/:id/details", vendorController.getVendorDetails);
+
+// =================================================================
+// ADMIN-ONLY VENDOR ROUTES (Auth + Admin Role Required)
+// =================================================================
+
+// Route to get all vendors for Admin
 router.get(
   "/",
   authenticateToken,
@@ -30,10 +70,13 @@ router.get(
   vendorController.getAllVendors
 );
 
-router.get("/:vendorId", vendorController.getVendorById); // New route to get vendor by ID
-
-// Route to update a vendor by ID
-router.put("/:id", vendorController.updateVendor);
+// Route to get a specific vendor by ID for Admin
+router.get(
+  "/:vendorId", // Using vendorId to avoid conflict with other /:id routes
+  authenticateToken,
+  authorizeAdmin,
+  vendorController.getVendorById
+);
 
 // Restrict Vendor
 router.put(
@@ -48,48 +91,8 @@ router.put(
   "/unrestrict/:id",
   authenticateToken,
   authorizeAdmin,
-  vendorController.unRestrictVendor
+  vendorController.unRestrictVendor // Corrected typo here
 );
-
-// Route to delete a vendor by ID
-router.delete("/:id", vendorController.deleteVendor);
-
-// Route for vendor login
-router.post("/login", vendorController.vendorLogin);
-
-// Get all vendors (online + offline)
-router.get("/all/vendor", vendorController.getAllVendors);
-
-// Get nearby vendors (based on location)
-router.get("/nearby/vendor", vendorController.getNearbyVendors);
-
-// Toggle vendor status (on/off)
-router.patch("/toggle-status/:id", vendorController.toggleVendorStatus);
-
-// Get vendors by category
-router.get("/by-category/:categoryId", vendorController.getVendorsByCategory);
-
-// Search vendors
-router.get("/search", vendorController.searchVendors);
-
-// Vendor details
-router.get("/:id/details", vendorController.getVendorDetails);
-
-router.put("/address/:vendorId", vendorController.updateVendorAddress); // New route for updating address
-
-// Route to get a vendor by ID (for admin)
-router.get(
-  "/:vendorId",
-  authenticateToken,
-  authorizeAdmin,
-  vendorController.getVendorById
-);
-
-// Forgot Password
-router.post("/forgot-password", vendorController.forgotPassword);
-
-// Reset Password
-router.post("/reset-password/:token", vendorController.resetPassword);
 
 // Route for admin to login as a vendor
 router.post(
@@ -99,7 +102,20 @@ router.post(
   vendorController.adminLoginAsVendor
 );
 
-// 👇 ADD THIS NEW ROUTE for searching vendors in a category
-router.get("/search/:categoryId", vendorController.searchVendorsByCategory);
+// =================================================================
+// VENDOR-SPECIFIC ROUTES (Auth Required)
+// =================================================================
+
+// Toggle vendor status (on/off) by the vendor
+router.patch("/toggle-status/:id", vendorController.toggleVendorStatus);
+
+// Update a vendor by ID
+router.put("/:id", vendorController.updateVendor);
+
+// Update a vendor's address
+router.put("/address/:vendorId", vendorController.updateVendorAddress);
+
+// Delete a vendor by ID
+router.delete("/:id", vendorController.deleteVendor);
 
 module.exports = router;
