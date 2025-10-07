@@ -28,8 +28,9 @@ app.use(
 );
 const port = process.env.PORT || 3000;
 
-// Middleware to parse JSON bodies
-app.use(express.json());
+// Middleware to parse JSON bodies with increased limit
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Serve static files from the 'build' directory of the frontend
 app.use(express.static(path.join(__dirname, "..", "sevabazar_panel", "build")));
