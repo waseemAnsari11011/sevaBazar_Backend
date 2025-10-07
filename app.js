@@ -17,12 +17,7 @@ const ChatOrder = require("./src/modules/ChatOrdrer/route");
 const deliveryRoutes = require("./src/modules/Delivery/route");
 
 const app = express();
-const corsOptions = {
-  origin: "*",
-  optionsSuccessStatus: 200,
-};
-
-app.use(cors(corsOptions));
+app.use(cors({ origin: "https://newadmin.sevabazar.com" }));
 const port = process.env.PORT || 3000;
 
 // Middleware to parse JSON bodies
