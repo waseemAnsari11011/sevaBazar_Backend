@@ -1,20 +1,7 @@
-// src/modules/Middleware/s3UploadHandler.js
 const createS3Upload = require("./s3UploadMiddleware");
 
-const handleS3Upload = (folderName, config) => (req, res, next) => {
-  // createS3Upload now handles the logic
-  const s3UploadMiddleware = createS3Upload(folderName, config);
-
-  s3UploadMiddleware(req, res, (err) => {
-    if (err) {
-      console.error("S3 Upload Error:", err);
-      return res.status(400).json({
-        error: err.message,
-        message: "File upload failed",
-      });
-    }
-    next();
-  });
+const handleS3Upload = (folderName, config) => {
+  return createS3Upload(folderName, config);
 };
 
 module.exports = handleS3Upload;
