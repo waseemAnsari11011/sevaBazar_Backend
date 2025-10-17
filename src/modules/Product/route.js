@@ -1,18 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const productController = require("./controller"); // Adjust the path as necessary
+const productController = require("./controller");
 const handleS3Upload = require("../Middleware/s3UploadHandler");
 
-// Define dynamic fields for S3 upload
-const getProductUploadFields = () => {
+// Middleware for creating a product with many variations
+const createProductUploadFields = () => {
   const fields = [];
-
-  // Product images (up to 10 images)
-  for (let i = 0; i < 10; i++) {
-    fields.push({ name: `productImage_${i}`, maxCount: 1 });
-  }
-
-  // Variation images (up to 50 variations, 5 images each)
   for (let variationIndex = 0; variationIndex < 50; variationIndex++) {
     for (let imageIndex = 0; imageIndex < 5; imageIndex++) {
       fields.push({
@@ -21,30 +14,53 @@ const getProductUploadFields = () => {
       });
     }
   }
-
   return fields;
 };
 
-// Route to add a new product with file upload middleware
+// Middleware for updating a SINGLE variation's images
+const updateVariationUploadFields = [
+  { name: "newImages", maxCount: 5 }, // Simple field name for new images
+];
+
+// --- ROUTES ---
+
+// Create a new product
 router.post(
   "/products",
-  handleS3Upload("products", getProductUploadFields()),
+  handleS3Upload("products", createProductUploadFields()),
   productController.addProduct
 );
+
+// Update core product details (no file upload)
 router.put(
   "/products/:id",
-  handleS3Upload("products", getProductUploadFields()),
-  productController.updateProduct
+  express.json(),
+  productController.updateProductDetails
 );
-router.delete("/products/:id", productController.deleteProduct);
+
+// ADD NEW VARIATION to an existing product
+router.post(
+  "/products/:id/variations",
+  handleS3Upload("products", updateVariationUploadFields),
+  productController.addVariation
+);
+
+// Update a specific, existing variation
+router.put(
+  "/products/:id/variations/:variationId",
+  // FIXED: Use the correct, simpler middleware for this route
+  handleS3Upload("products", updateVariationUploadFields),
+  productController.updateVariation
+);
 router.get("/products/:vendorId", productController.getAllProductsVendor);
+router.get("/single-product/:id", productController.getProductById);
+
+router.delete("/products/:id", productController.deleteProduct);
 router.get("/get-all-products/", productController.getAllProducts);
 router.get(
   "/products-low-quantity/:vendorId",
   productController.getProductsLowQuantity
 );
-
-router.get("/single-product/:id", productController.getProductById);
 
 router.get(
   "/categories/:id/products",

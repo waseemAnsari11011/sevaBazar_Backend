@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
+const Customer = require("../Customer/model.js");
 
 require("dotenv").config();
 const secret = process.env.JWT_SECRET;
@@ -416,14 +417,84 @@ exports.getVendorsByCategory = async (req, res) => {
   console.log("getVendorsByCategory is called");
   try {
     const { categoryId } = req.params;
-    const vendors = await Vendor.find({ category: categoryId }).select(
-      "-password"
+    // Assumes customer ID is available from auth middleware, e.g., req.user.id
+    const customerId = req.user.id;
+
+    if (!customerId) {
+      return res
+        .status(401)
+        .json({ message: "Authentication error: Customer ID not found." });
+    }
+
+    // 1. Fetch the customer to find their active shipping address
+    const customer = await Customer.findById(customerId).select(
+      "shippingAddresses"
     );
+
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found." });
+    }
+
+    const activeAddress = customer.shippingAddresses.find(
+      (addr) => addr.isActive
+    );
+
+    // If customer has no active address, we cannot perform location-based filtering.
+    if (!activeAddress) {
+      console.log("No active shipping address found for customer.");
+      return res.status(200).json([]);
+    }
+
+    // 2. Prepare address tokens and postal code from the customer's address
+    const { landmark, address, city, state, country, postalCode } =
+      activeAddress;
+
+    // Combine all relevant address parts into a single string
+    const fullAddressString = [landmark, address, city, state, country]
+      .filter(Boolean) // Remove any null or undefined parts
+      .join(" ");
+
+    // Create an array of unique, non-empty, lowercase word "tokens"
+    const addressTokens = [
+      ...new Set(fullAddressString.toLowerCase().split(/[\s,]+/).filter(Boolean)),
+    ];
+
+    // 3. Build the core matching logic for the query
+    const matchConditions = [];
+
+    // Condition A: Match the vendor's postal code
+    if (postalCode) {
+      matchConditions.push({ "location.address.postalCode": postalCode });
+      // Also check against the array of postal codes the vendor serves
+      matchConditions.push({ "location.address.postalCodes": postalCode });
+    }
+
+    // Condition B: Match any of the address words in the vendor's address fields
+    if (addressTokens.length > 0) {
+      // The regex pattern will look like /word1|word2|another/i
+      const addressRegex = new RegExp(addressTokens.join("|"), "i");
+      matchConditions.push({ "location.address.addressLine1": addressRegex });
+      matchConditions.push({ "location.address.addressLine2": addressRegex });
+      matchConditions.push({ "location.address.landmark": addressRegex });
+    }
+
+    // If we have no conditions to match, return an empty array.
+    if (matchConditions.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    // 4. Find vendors matching the category AND either the postal code OR address words
+    const vendors = await Vendor.find({
+      category: categoryId, // Must be in the correct category
+      $or: matchConditions, // And must match one of the location conditions
+    }).select("-password");
+
     res.status(200).json(vendors);
   } catch (error) {
+    console.error("Error in getVendorsByCategory:", error);
     res
       .status(500)
-      .json({ message: "Error fetching vendors by category", error });
+      .json({ message: "Error fetching vendors by category", error: error.message });
   }
 };
 

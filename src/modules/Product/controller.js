@@ -1,7 +1,7 @@
-const Product = require("./model"); // Adjust the path as necessary
 const mongoose = require("mongoose");
 const Category = require("../Category/model");
 const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { Product, ProductVariation } = require("./model");
 
 // Configure AWS S3 Client
 const s3Client = new S3Client({
@@ -53,260 +53,243 @@ const extractS3KeyFromUrl = (url) => {
   return null;
 };
 
-// src/modules/Product/controller.js
-// Controller function to add a new product
 exports.addProduct = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const {
       name,
       description,
       category,
       vendor,
-      availableLocalities,
       tags,
       isReturnAllowed,
+      isVisible, // ADDED: Handle visibility on creation
+      arrivalDuration,
+      variations: variationsJSON,
     } = req.body;
 
-    // ✅ FIX: Convert req.files object to a flat array before filtering
-    const allUploadedFiles = req.files ? Object.values(req.files).flat() : [];
+    // ... (rest of the function is good)
 
-    // Extract S3 URLs from uploaded files
-    const images = allUploadedFiles
-      .filter((file) => file.fieldname.startsWith("productImage"))
-      .map((file) => file.location); // S3 URL is stored in file.location
-
-    const variationImages = allUploadedFiles.filter((file) =>
-      file.fieldname.startsWith("variationImage")
-    );
-
-    const variations = JSON.parse(req.body.variations);
-
-    if (!variations || variations.length === 0) {
-      return res.status(400).json({
-        message: "At least one variation is required",
-      });
-    }
-
-    // Create new product instance first
     const newProduct = new Product({
       name,
-      images,
       description,
       category,
       vendor,
-      availableLocalities,
       tags,
       isReturnAllowed,
+      isVisible, // ADDED
+      arrivalDuration,
+      variations: [],
     });
 
-    const variationReferences = {};
-    const childQuantities = {};
+    // ... (rest of the function is correct)
 
-    // Process and format variations
-    const formattedVariations = variations.map((variation, index) => {
-      const formattedVariation = {
-        attributes: variation.attributes,
-        price: variation.price ? parseInt(variation.price) : 0,
-        discount: variation.discount ? parseInt(variation.discount) : 0,
-        quantity: variation.quantity ? parseInt(variation.quantity) : 0,
-        images: variationImages
-          .filter((file) => file.fieldname.includes(`variationImage_${index}`))
-          .map((file) => file.location), // S3 URL is stored in file.location
-        parentVariation: null,
-      };
-
-      if (
-        variation.parentVariation !== null &&
-        variation.parentVariation !== ""
-      ) {
-        const parentIndex = variation.parentVariation.match(/\d+/)[0];
-        if (variationReferences[parentIndex]) {
-          formattedVariation.parentVariation =
-            variationReferences[parentIndex]._id;
-          if (!childQuantities[parentIndex]) {
-            childQuantities[parentIndex] = 0;
-          }
-          childQuantities[parentIndex] += formattedVariation.quantity;
-        } else {
-          // This logic might need adjustment if parent variation isn't found
-          console.warn(
-            `Parent variation not found for: ${variation.parentVariation}`
-          );
-        }
-      }
-
-      const createdVariation = newProduct.variations.create(formattedVariation);
-      variationReferences[index + 1] = createdVariation;
-
-      return createdVariation;
-    });
-
-    // Validate child quantities against parent quantities
-    for (const parentIndex in childQuantities) {
-      if (
-        childQuantities[parentIndex] > variationReferences[parentIndex].quantity
-      ) {
-        return res.status(400).json({
-          message: `Sum of child quantities exceeds parent quantity for parent variation: ${parentIndex}`,
-        });
-      }
+    // --- The rest of your addProduct function is correct ---
+    const allVariationImages = req.files ? Object.values(req.files).flat() : [];
+    const variationsData = JSON.parse(variationsJSON);
+    if (!variationsData || variationsData.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ message: "At least one variation is required" });
     }
-
-    newProduct.variations = formattedVariations;
-    newProduct.price = formattedVariations[0].price;
-    newProduct.discount = formattedVariations[0].discount;
-    newProduct.quantity = variations.reduce(
-      (sum, variation) => sum + (parseInt(variation.quantity, 10) || 0),
-      0
+    const variationsToCreate = variationsData.map((variation, index) => {
+      const images = allVariationImages
+        .filter((file) => file.fieldname.startsWith(`variationImage_${index}`))
+        .map((file) => file.location);
+      return {
+        product: newProduct._id,
+        attributes: variation.attributes,
+        price: variation.price,
+        discount: variation.discount,
+        quantity: variation.quantity,
+        images: images,
+      };
+    });
+    const savedVariations = await ProductVariation.insertMany(
+      variationsToCreate,
+      { session }
     );
-
-    const savedProduct = await newProduct.save();
-
+    newProduct.variations = savedVariations.map((v) => v._id);
+    const savedProduct = await newProduct.save({ session });
+    await session.commitTransaction();
     res.status(201).json({
-      message: "Product created successfully",
+      message: "Product and its variations created successfully",
       product: savedProduct,
     });
   } catch (error) {
-    console.error(error);
+    await session.abortTransaction();
+    console.error("Transaction Error:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to create product", error: error.message });
+  } finally {
+    session.endSession();
+  }
+};
+
+exports.updateProductDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const allowedUpdates = {
+      name: req.body.name,
+      description: req.body.description,
+      category: req.body.category,
+      vendor: req.body.vendor,
+      tags: req.body.tags,
+      isReturnAllowed: req.body.isReturnAllowed,
+      isVisible: req.body.isVisible, // ADDED: Handle visibility updates
+      arrivalDuration: req.body.arrivalDuration,
+    };
+
+    Object.keys(allowedUpdates).forEach(
+      (key) => allowedUpdates[key] === undefined && delete allowedUpdates[key]
+    );
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+      id,
+      { $set: allowedUpdates },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    res.status(200).json({
+      message: "Product details updated successfully",
+      product: updatedProduct,
+    });
+  } catch (error) {
+    console.error("Failed to update product details:", error);
     res.status(500).json({
-      message: "Failed to create product",
+      message: "Failed to update product details",
       error: error.message,
     });
   }
 };
 
-// ... (rest of your controller file)
+// =================================================================
+// ADD NEW VARIATION to an existing product
+// =================================================================
+exports.addVariation = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-// Controller function to update an existing product
-exports.updateProduct = async (req, res) => {
   try {
-    const { id } = req.params;
-    const product = await Product.findById(id);
+    const { id } = req.params; // Product ID
+    const { attributes, price, discount, quantity } = req.body;
 
+    const product = await Product.findById(id).session(session);
     if (!product) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: "Product not found" });
     }
 
-    // --- 1. Process Request Body ---
-    const { name, description, category, vendor, isReturnAllowed } = req.body;
+    // This logic correctly handles the new schema.
+    // When sending an array of objects via multipart/form-data,
+    // it's best practice to JSON.stringify() it on the client.
+    // This line parses it back into the required array of objects.
+    const parsedAttributes =
+      typeof attributes === "string" ? JSON.parse(attributes) : attributes;
 
-    // Sanitize array fields from FormData
-    const availableLocalities = Array.isArray(req.body.availableLocalities)
-      ? req.body.availableLocalities
-      : req.body.availableLocalities
-      ? [req.body.availableLocalities]
+    const images = req.files?.newImages
+      ? req.files.newImages.map((file) => file.location)
       : [];
 
-    const tags = Array.isArray(req.body.tags)
-      ? req.body.tags
-      : req.body.tags
-      ? [req.body.tags]
-      : [];
-
-    const existingImages = Array.isArray(req.body.existingImages)
-      ? req.body.existingImages
-      : req.body.existingImages
-      ? [req.body.existingImages]
-      : [];
-
-    const parsedVariations = JSON.parse(req.body.variations || "[]");
-
-    // --- 2. Process File Uploads ---
-    // ✅ FIX: Convert req.files object to a flat array to handle uploads correctly
-    const allUploadedFiles = req.files ? Object.values(req.files).flat() : [];
-
-    const newProductImages = allUploadedFiles
-      .filter((file) => file.fieldname.startsWith("productImage"))
-      .map((file) => file.location);
-
-    const newVariationImagesMap = new Map();
-    allUploadedFiles
-      .filter((file) => file.fieldname.startsWith("variationImage"))
-      .forEach((file) => {
-        const parts = file.fieldname.split("_");
-        const variationIndex = parseInt(parts[1], 10);
-        if (!newVariationImagesMap.has(variationIndex)) {
-          newVariationImagesMap.set(variationIndex, []);
-        }
-        newVariationImagesMap.get(variationIndex).push(file.location);
-      });
-
-    // --- 3. Manage S3 Image Deletion ---
-    const oldImageUrls = [
-      ...product.images,
-      ...product.variations.flatMap((v) => v.images),
-    ];
-
-    const keptImageUrls = new Set([
-      ...existingImages,
-      ...parsedVariations.flatMap((v) =>
-        v.images.filter((img) => typeof img === "string")
-      ),
-    ]);
-
-    const imagesToDelete = oldImageUrls.filter(
-      (url) => !keptImageUrls.has(url)
-    );
-
-    // Asynchronously delete images from S3
-    for (const imageUrl of imagesToDelete) {
-      const s3Key = extractS3KeyFromUrl(imageUrl);
-      if (s3Key) {
-        await deleteS3Object(s3Key);
-      }
-    }
-
-    // --- 4. Format Variations and Merge Images ---
-    const formattedVariations = parsedVariations.map((variation, index) => {
-      // Combine existing string URLs with new S3 URLs for this variation
-      const existingVarImages = variation.images.filter(
-        (img) => typeof img === "string"
-      );
-      const newVarImages = newVariationImagesMap.get(index) || [];
-
-      return {
-        ...variation,
-        _id: variation._id || new mongoose.Types.ObjectId(), // Ensure new variations get an ID
-        images: [...existingVarImages, ...newVarImages],
-        price: parseInt(variation.price, 10) || 0,
-        discount: parseInt(variation.discount, 10) || 0,
-        quantity: parseInt(variation.quantity, 10) || 0,
-      };
+    const newVariation = new ProductVariation({
+      product: product._id,
+      attributes: parsedAttributes, // Will be [{name: "...", value: "..."}, ...]
+      price: parseFloat(price),
+      discount: parseFloat(discount) || 0,
+      quantity: parseInt(quantity) || 0,
+      images: images,
     });
 
-    // --- 5. Update Product Document ---
-    product.name = name;
-    product.description = description;
-    product.category = category;
-    product.vendor = vendor;
-    product.isReturnAllowed = isReturnAllowed;
-    product.availableLocalities = availableLocalities;
-    product.tags = tags;
+    const savedVariation = await newVariation.save({ session });
 
-    // Combine existing product images with new ones
-    product.images = [...existingImages, ...newProductImages];
-    product.variations = formattedVariations;
+    product.variations.push(savedVariation._id);
+    await product.save({ session });
 
-    // Recalculate main price/quantity from the first variation
-    if (formattedVariations.length > 0) {
-      product.price = formattedVariations[0].price;
-      product.discount = formattedVariations[0].discount;
-      product.quantity = formattedVariations.reduce(
-        (sum, v) => sum + v.quantity,
-        0
-      );
-    }
+    await session.commitTransaction();
 
-    const updatedProduct = await product.save();
-
-    res.status(200).json({
-      message: "Product updated successfully",
-      product: updatedProduct,
+    res.status(201).json({
+      message: "Variation added successfully",
+      variation: savedVariation,
     });
   } catch (error) {
-    console.error("Failed to update product:", error);
+    await session.abortTransaction();
+    console.error("Failed to add variation:", error);
     res.status(500).json({
-      message: "Failed to update product",
+      message: "Failed to add variation",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+// =================================================================
+// Update a specific, existing variation
+// =================================================================
+exports.updateVariation = async (req, res) => {
+  try {
+    const { variationId } = req.params;
+    const { price, discount, quantity, attributes } = req.body;
+
+    const variation = await ProductVariation.findById(variationId);
+    if (!variation) {
+      return res.status(404).json({ message: "Variation not found" });
+    }
+
+    // Handle Image Updates
+    const existingImages = JSON.parse(req.body.existingImages || "[]");
+    const newImages = req.files.newImages
+      ? req.files.newImages.map((file) => file.location)
+      : [];
+
+    // Determine which images to delete from S3
+    const imagesToDelete = variation.images.filter(
+      (url) => !existingImages.includes(url)
+    );
+
+    if (imagesToDelete.length > 0) {
+      await Promise.all(
+        imagesToDelete.map((url) => {
+          const s3Key = extractS3KeyFromUrl(url);
+          if (s3Key) return deleteS3Object(s3Key);
+          return Promise.resolve();
+        })
+      );
+    }
+
+    // Update fields
+    variation.price = price;
+    variation.discount = discount;
+    variation.quantity = quantity;
+    variation.images = [...existingImages, ...newImages];
+
+    // Just like in addVariation, this correctly parses the stringified array
+    // of attribute objects from the form data.
+    if (attributes) {
+      variation.attributes = JSON.parse(attributes);
+    }
+
+    const updatedVariation = await variation.save();
+
+    res.status(200).json({
+      message: "Variation updated successfully",
+      variation: updatedVariation,
+    });
+  } catch (error) {
+    console.error("Failed to update variation:", error);
+    res.status(500).json({
+      message: "Failed to update variation",
       error: error.message,
     });
   }
@@ -324,26 +307,6 @@ exports.deleteProduct = async (req, res) => {
       return res.status(404).json({
         message: "Product not found",
       });
-    }
-
-    // Delete product images from S3
-    for (const imagePath of product.images) {
-      const s3Key = extractS3KeyFromUrl(imagePath);
-      if (s3Key) {
-        await deleteS3Object(s3Key);
-      }
-    }
-
-    // Delete variation images from S3
-    for (const variation of product.variations) {
-      if (variation.images && variation.images.length > 0) {
-        for (const imagePath of variation.images) {
-          const s3Key = extractS3KeyFromUrl(imagePath);
-          if (s3Key) {
-            await deleteS3Object(s3Key);
-          }
-        }
-      }
     }
 
     // Delete the product from the database
@@ -366,16 +329,17 @@ exports.deleteProduct = async (req, res) => {
 // Controller function to get all products
 exports.getAllProductsVendor = async (req, res) => {
   try {
-    const vendorId = req.params.vendorId;
+    const { vendorId } = req.params;
 
-    // Find all products, populate the category field, and sort by creation date (latest to oldest)
+    // Find all products and populate BOTH category and variations
     const products = await Product.find({ vendor: vendorId })
-      .populate("category")
+      .populate("category") // Populates the category details
+      .populate("variations") // ✅ FIXED: Populates all associated variation details
       .sort({ createdAt: -1 });
 
-    // Send response with the products
+    // Send response with the complete product and variation data
     res.status(200).json({
-      message: "Products retrieved successfully",
+      message: "Products and their variations retrieved successfully",
       products,
     });
   } catch (error) {
@@ -427,13 +391,13 @@ exports.getProductsLowQuantity = async (req, res) => {
 
 // Controller function to get a product by ID
 exports.getProductById = async (req, res) => {
-  // console.log("getProductById->>", req.params.id)
-
   try {
     const { id } = req.params;
 
-    // Find the product by ID and populate the category field
-    const product = await Product.findById(id);
+    // Find the product and populate its category AND variations
+    const product = await Product.findById(id)
+      .populate("category") // Gets category details
+      .populate("variations"); // ✅ FIXED: Gets all variation details
 
     if (!product) {
       return res.status(404).json({
@@ -441,7 +405,7 @@ exports.getProductById = async (req, res) => {
       });
     }
 
-    // Send the product in the response
+    // Send the complete product object in the response
     res.status(200).json({
       message: "Product retrieved successfully",
       product,
@@ -989,7 +953,10 @@ exports.searchVendorProducts = async (req, res) => {
 exports.getProductsByVendor = async (req, res) => {
   console.log("it is called!!");
   try {
-    const products = await Product.find({ vendor: req.params.vendorId });
+    // Chain .populate() to the find query to include variation details
+    const products = await Product.find({
+      vendor: req.params.vendorId,
+    }).populate("variations");
     res.json(products);
   } catch (error) {
     res.status(500).json({ message: error.message });

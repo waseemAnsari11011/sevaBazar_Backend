@@ -15,6 +15,7 @@ const ContactRoutes = require("./src/modules/Contactus/route");
 const BannerRoutes = require("./src/modules/Banner/route");
 const ChatOrder = require("./src/modules/ChatOrdrer/route");
 const deliveryRoutes = require("./src/modules/Delivery/route");
+const settingsRoutes = require("./src/modules/Settings/route");
 
 const app = express();
 // More robust CORS configuration
@@ -60,6 +61,7 @@ app.use(ContactRoutes);
 app.use(BannerRoutes);
 app.use(ChatOrder);
 app.use(deliveryRoutes);
+app.use("/settings", settingsRoutes);
 
 // For any other route, serve the index.html file
 app.get("*", (req, res) => {

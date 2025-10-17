@@ -46,7 +46,11 @@ router.get("/all/vendor", vendorController.getAllVendors);
 router.get("/nearby/vendor", vendorController.getNearbyVendors);
 
 // Get vendors by category
-router.get("/by-category/:categoryId", vendorController.getVendorsByCategory);
+router.get(
+  "/by-category/:categoryId",
+  authenticateToken,
+  vendorController.getVendorsByCategory
+);
 
 // Search vendors
 router.get("/search", vendorController.searchVendors);
