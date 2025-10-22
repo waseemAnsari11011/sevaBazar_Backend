@@ -138,7 +138,7 @@ exports.updateCustomer = async (req, res) => {
     // Extract customer ID from route parameters
     const customerId = req.params.id;
 
-    console.log("customerId--->>", customerId);
+    // console.log("customerId--->>", customerId);
 
     // Extract new customer details from request body
     const updatedData = req.body;
@@ -178,12 +178,12 @@ exports.updateFcm = async (req, res) => {
     // Extract customer ID from route parameters
     const customerId = req.params.id;
 
-    console.log("customerId--->>", customerId);
+    // console.log("customerId--->>", customerId);
 
     // Extract new customer details from request body
     const updatedData = req.body;
 
-    console.log("updatedData-->>", updatedData);
+    // console.log("updatedData-->>", updatedData);
 
     // Find the customer by ID and update their details
     const updatedCustomer = await Customer.findByIdAndUpdate(

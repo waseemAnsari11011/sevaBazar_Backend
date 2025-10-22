@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const Customer = require("../Customer/model.js");
+const createLocationFilter = require("../utils/locationFilter.js");
 
 require("dotenv").config();
 const secret = process.env.JWT_SECRET;
@@ -234,11 +235,63 @@ exports.searchVendors = async (req, res) => {
 
 // Controller to fetch all vendors with role 'vendor'
 exports.getAllVendors = async (req, res) => {
+  console.log("getAllVendors is called");
   try {
-    const vendors = await Vendor.find().select("-password");
-    res.status(200).json(vendors);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    // 1. Get the location filter from the utility
+    const locationFilter = await createLocationFilter(req);
+
+    // 2. If no filter (e.g., no active address), return an empty array
+    // This enforces the app's location-based rule.
+    if (!locationFilter) {
+      return res.status(200).json({ total: 0, page, limit, vendors: [] });
+    }
+
+    // 3. Base filter: only online, non-restricted vendors
+    const baseFilter = {
+      status: "online",
+      isRestricted: false,
+    };
+
+    // 4. Combine the base filter with the location filter
+    const finalFilter = {
+      ...baseFilter,
+      ...locationFilter, // Spread the { $or: [...] }
+    };
+
+    // 5. Find vendors, sort by most recent, apply pagination
+    const vendors = await Vendor.find(finalFilter)
+      .sort({ createdAt: -1 }) // Sort by creation date
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select("-password"); // Exclude password
+
+    // 6. Count total documents matching the filter for pagination metadata
+    const totalVendors = await Vendor.countDocuments(finalFilter);
+
+    res.status(200).json({
+      total: totalVendors,
+      page,
+      limit,
+      vendors: vendors, // Send vendors back in a 'vendors' key
+    });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching vendors", error });
+    console.error("Error in getAllVendors:", error);
+
+    // Handle specific errors thrown by the utility
+    if (error.message.includes("Authentication error")) {
+      return res.status(401).json({ message: error.message });
+    }
+    if (error.message.includes("Customer not found")) {
+      return res.status(404).json({ message: error.message });
+    }
+
+    // Generic fallback error
+    res
+      .status(500)
+      .json({ message: "Error fetching vendors", error: error.message });
   }
 };
 
@@ -417,84 +470,42 @@ exports.getVendorsByCategory = async (req, res) => {
   console.log("getVendorsByCategory is called");
   try {
     const { categoryId } = req.params;
-    // Assumes customer ID is available from auth middleware, e.g., req.user.id
-    const customerId = req.user.id;
 
-    if (!customerId) {
-      return res
-        .status(401)
-        .json({ message: "Authentication error: Customer ID not found." });
-    }
+    // 1. Get the location filter from the utility
+    // This one line replaces ~40 lines of code
+    const locationFilter = await createLocationFilter(req);
 
-    // 1. Fetch the customer to find their active shipping address
-    const customer = await Customer.findById(customerId).select(
-      "shippingAddresses"
-    );
-
-    if (!customer) {
-      return res.status(404).json({ message: "Customer not found." });
-    }
-
-    const activeAddress = customer.shippingAddresses.find(
-      (addr) => addr.isActive
-    );
-
-    // If customer has no active address, we cannot perform location-based filtering.
-    if (!activeAddress) {
-      console.log("No active shipping address found for customer.");
+    // 2. If no filter (e.g., no active address), return empty array
+    if (!locationFilter) {
       return res.status(200).json([]);
     }
 
-    // 2. Prepare address tokens and postal code from the customer's address
-    const { landmark, address, city, state, country, postalCode } =
-      activeAddress;
+    // 3. Build the final query by merging the category filter and location filter
+    const finalQuery = {
+      category: categoryId,
+      ...locationFilter, // Spread the { $or: [...] } object
+    };
 
-    // Combine all relevant address parts into a single string
-    const fullAddressString = [landmark, address, city, state, country]
-      .filter(Boolean) // Remove any null or undefined parts
-      .join(" ");
-
-    // Create an array of unique, non-empty, lowercase word "tokens"
-    const addressTokens = [
-      ...new Set(fullAddressString.toLowerCase().split(/[\s,]+/).filter(Boolean)),
-    ];
-
-    // 3. Build the core matching logic for the query
-    const matchConditions = [];
-
-    // Condition A: Match the vendor's postal code
-    if (postalCode) {
-      matchConditions.push({ "location.address.postalCode": postalCode });
-      // Also check against the array of postal codes the vendor serves
-      matchConditions.push({ "location.address.postalCodes": postalCode });
-    }
-
-    // Condition B: Match any of the address words in the vendor's address fields
-    if (addressTokens.length > 0) {
-      // The regex pattern will look like /word1|word2|another/i
-      const addressRegex = new RegExp(addressTokens.join("|"), "i");
-      matchConditions.push({ "location.address.addressLine1": addressRegex });
-      matchConditions.push({ "location.address.addressLine2": addressRegex });
-      matchConditions.push({ "location.address.landmark": addressRegex });
-    }
-
-    // If we have no conditions to match, return an empty array.
-    if (matchConditions.length === 0) {
-      return res.status(200).json([]);
-    }
-
-    // 4. Find vendors matching the category AND either the postal code OR address words
-    const vendors = await Vendor.find({
-      category: categoryId, // Must be in the correct category
-      $or: matchConditions, // And must match one of the location conditions
-    }).select("-password");
+    // 4. Find vendors matching the combined query
+    const vendors = await Vendor.find(finalQuery).select("-password");
 
     res.status(200).json(vendors);
   } catch (error) {
     console.error("Error in getVendorsByCategory:", error);
-    res
-      .status(500)
-      .json({ message: "Error fetching vendors by category", error: error.message });
+
+    // Handle specific errors thrown by the utility
+    if (error.message.includes("Authentication error")) {
+      return res.status(401).json({ message: error.message });
+    }
+    if (error.message.includes("Customer not found")) {
+      return res.status(404).json({ message: error.message });
+    }
+
+    // Generic fallback error
+    res.status(500).json({
+      message: "Error fetching vendors by category",
+      error: error.message,
+    });
   }
 };
 

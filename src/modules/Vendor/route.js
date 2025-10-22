@@ -39,8 +39,8 @@ router.post("/reset-password/:token", vendorController.resetPassword);
 // PUBLIC VENDOR ROUTES (No Auth Required)
 // =================================================================
 
-// Get all vendors (online + offline) - Public
-router.get("/all/vendor", vendorController.getAllVendors);
+// Get all vendors (online + offline) - Customer app
+router.get("/all/vendor", authenticateToken, vendorController.getAllVendors);
 
 // Get nearby vendors (based on location)
 router.get("/nearby/vendor", vendorController.getNearbyVendors);
@@ -65,6 +65,14 @@ router.get("/:id/details", vendorController.getVendorDetails);
 // =================================================================
 // ADMIN-ONLY VENDOR ROUTES (Auth + Admin Role Required)
 // =================================================================
+
+// Route to get all vendors for Admin
+router.get(
+  "/",
+  authenticateToken,
+  authorizeAdmin,
+  vendorController.getAllVendors
+);
 
 // Route to get all vendors for Admin
 router.get(
