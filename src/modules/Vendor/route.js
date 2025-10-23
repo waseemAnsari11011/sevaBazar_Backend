@@ -41,6 +41,12 @@ router.post("/reset-password/:token", vendorController.resetPassword);
 
 // Get all vendors (online + offline) - Customer app
 router.get("/all/vendor", authenticateToken, vendorController.getAllVendors);
+// Get all vendors with product discounts, sorted by highest discount
+router.get(
+  "/all/vendor/with-discounts",
+  authenticateToken,
+  vendorController.getVendorsWithDiscounts
+);
 
 // Get nearby vendors (based on location)
 router.get("/nearby/vendor", vendorController.getNearbyVendors);

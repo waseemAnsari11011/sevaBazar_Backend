@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const Customer = require("../Customer/model.js");
 const createLocationFilter = require("../utils/locationFilter.js");
+const { Product, ProductVariation } = require("../Product/model.js");
 
 require("dotenv").config();
 const secret = process.env.JWT_SECRET;
@@ -289,6 +290,127 @@ exports.getAllVendors = async (req, res) => {
     }
 
     // Generic fallback error
+    res
+      .status(500)
+      .json({ message: "Error fetching vendors", error: error.message });
+  }
+};
+
+exports.getVendorsWithDiscounts = async (req, res) => {
+  console.log("getVendorsWithDiscounts is called");
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // 1. Get the same location filter as the other endpoint
+    const locationFilter = await createLocationFilter(req);
+    if (!locationFilter) {
+      // If no active address, no vendors can be found
+      return res.status(200).json({ total: 0, page, limit, vendors: [] });
+    }
+
+    // 2. Base filter for vendors
+    const baseFilter = {
+      status: "online",
+      isRestricted: false,
+    };
+
+    // 3. The Aggregation Pipeline
+    const pipeline = [
+      // Stage 1: Initial match on vendors (online, not restricted, and in the user's location)
+      {
+        $match: {
+          ...baseFilter,
+          ...locationFilter,
+        },
+      },
+      // Stage 2: Join Vendor with Products
+      {
+        $lookup: {
+          from: "products", // The collection name for the Product model
+          localField: "_id",
+          foreignField: "vendor",
+          as: "products",
+        },
+      },
+      // Stage 3: Unwind the products array to process each product individually
+      { $unwind: "$products" },
+      // Stage 4: Join Product with ProductVariations
+      {
+        $lookup: {
+          from: "productvariations", // The collection name for ProductVariation
+          localField: "products.variations",
+          foreignField: "_id",
+          as: "variations",
+        },
+      },
+      // Stage 5: Unwind the variations array
+      { $unwind: "$variations" },
+      // Stage 6: Filter for variations that actually have a discount
+      {
+        $match: {
+          "variations.discount": { $gt: 0 },
+        },
+      },
+      // Stage 7: Group back by vendor to find the max discount for each
+      {
+        $group: {
+          _id: "$_id",
+          maxDiscount: { $max: "$variations.discount" },
+          // Use $first to carry over the original vendor data
+          doc: { $first: "$$ROOT" },
+        },
+      },
+      // Stage 8: Replace the root to reshape the document back to a vendor structure
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: ["$doc", { maxDiscount: "$maxDiscount" }],
+          },
+        },
+      },
+      // Stage 9: Sort vendors by their highest discount in descending order
+      { $sort: { maxDiscount: -1 } },
+
+      // Stage 10: Remove fields we added during the pipeline that we don't need
+      {
+        $project: {
+          products: 0,
+          variations: 0,
+          password: 0, // IMPORTANT: always exclude sensitive data
+        },
+      },
+
+      // Stage 11: Use $facet to get both total count and paginated data in one query
+      {
+        $facet: {
+          metadata: [{ $count: "total" }],
+          data: [{ $skip: skip }, { $limit: limit }],
+        },
+      },
+    ];
+
+    // 4. Execute the aggregation
+    const results = await Vendor.aggregate(pipeline);
+
+    const vendors = results[0].data;
+    const totalVendors = results[0].metadata[0]?.total || 0;
+
+    res.status(200).json({
+      total: totalVendors,
+      page,
+      limit,
+      vendors: vendors,
+    });
+  } catch (error) {
+    console.error("Error in getVendorsWithDiscounts:", error);
+    if (error.message.includes("Authentication error")) {
+      return res.status(401).json({ message: error.message });
+    }
+    if (error.message.includes("Customer not found")) {
+      return res.status(404).json({ message: error.message });
+    }
     res
       .status(500)
       .json({ message: "Error fetching vendors", error: error.message });
