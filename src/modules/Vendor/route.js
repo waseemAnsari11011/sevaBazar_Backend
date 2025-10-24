@@ -12,7 +12,7 @@ const S3_FOLDER = "vendor-documents";
 // VENDOR AUTHENTICATION & REGISTRATION ROUTES
 // =================================================================
 
-// Route to create a new vendor (signup)
+// Route to create a new vendor (signup) - admin panel
 router.post(
   "/signup",
   handleS3Upload(S3_FOLDER, [
@@ -26,13 +26,13 @@ router.post(
   vendorController.createVendor
 );
 
-// Route for vendor login
+// Route for vendor login - admin panel
 router.post("/login", vendorController.vendorLogin);
 
-// Forgot Password
+// Forgot Password - admin panel
 router.post("/forgot-password", vendorController.forgotPassword);
 
-// Reset Password
+// Reset Password - admin panel
 router.post("/reset-password/:token", vendorController.resetPassword);
 
 // =================================================================
@@ -41,17 +41,15 @@ router.post("/reset-password/:token", vendorController.resetPassword);
 
 // Get all vendors (online + offline) - Customer app
 router.get("/all/vendor", authenticateToken, vendorController.getAllVendors);
-// Get all vendors with product discounts, sorted by highest discount
+
+// Get all vendors with product discounts, sorted by highest discount - Customer app
 router.get(
   "/all/vendor/with-discounts",
   authenticateToken,
   vendorController.getVendorsWithDiscounts
 );
 
-// Get nearby vendors (based on location)
-router.get("/nearby/vendor", vendorController.getNearbyVendors);
-
-// Get vendors by category
+// Get vendors by category - Customer app
 router.get(
   "/by-category/:categoryId",
   authenticateToken,
@@ -61,31 +59,22 @@ router.get(
 // Search vendors
 router.get("/search", vendorController.searchVendors);
 
-// Search vendors within a specific category
+// Search vendors within a specific category - Customer app
 router.get("/search/:categoryId", vendorController.searchVendorsByCategory);
 
 // Get a single vendor's public details
-// NOTE: This must be one of the LAST GET routes to avoid conflict
 router.get("/:id/details", vendorController.getVendorDetails);
 
 // =================================================================
 // ADMIN-ONLY VENDOR ROUTES (Auth + Admin Role Required)
 // =================================================================
 
-// Route to get all vendors for Admin
+// Route to get all vendors for Admin panel
 router.get(
-  "/",
+  "/getAllVendorsAdmin",
   authenticateToken,
   authorizeAdmin,
-  vendorController.getAllVendors
-);
-
-// Route to get all vendors for Admin
-router.get(
-  "/",
-  authenticateToken,
-  authorizeAdmin,
-  vendorController.getAllVendors
+  vendorController.getAllVendorsAdmin
 );
 
 // Route to get a specific vendor by ID for Admin

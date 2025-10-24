@@ -296,6 +296,30 @@ exports.getAllVendors = async (req, res) => {
   }
 };
 
+exports.getAllVendorsAdmin = async (req, res) => {
+  console.log("this api is called!!");
+  try {
+    // Find all documents in the Vendor collection.
+    // .select() is used to fetch only the fields required by the frontend.
+    // This improves performance by not sending unnecessary data like password hashes.
+    // .sort() orders the results, showing the most recently created vendors first.
+    const vendors = await Vendor.find({})
+      .select(
+        "name email vendorInfo.contactNumber location.address.postalCodes isRestricted"
+      )
+      .sort({ createdAt: -1 });
+
+    // Send a success response with the fetched vendors
+    res.status(200).json(vendors);
+  } catch (error) {
+    // Log the error for debugging purposes
+    console.error("Error fetching vendors for admin:", error);
+
+    // Send an error response if something goes wrong
+    res.status(500).json({ message: "Server error. Could not fetch vendors." });
+  }
+};
+
 exports.getVendorsWithDiscounts = async (req, res) => {
   console.log("getVendorsWithDiscounts is called");
   try {
@@ -536,34 +560,6 @@ exports.unRestrictVendor = async (req, res) => {
       message: "Failed to unrestrict vendor",
       error: error.message,
     });
-  }
-};
-
-// GET /vendors/nearby?lat=...&lng=...
-exports.getNearbyVendors = async (req, res) => {
-  try {
-    const { lat, lng } = req.query;
-    if (!lat || !lng) {
-      return res
-        .status(400)
-        .json({ message: "Latitude and longitude required" });
-    }
-    const vendors = await Vendor.aggregate([
-      {
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: [parseFloat(lng), parseFloat(lat)],
-          },
-          distanceField: "distance",
-          spherical: true,
-          maxDistance: 5000,
-        },
-      },
-    ]);
-    res.status(200).json(vendors);
-  } catch (error) {
-    res.status(500).json({ message: "Error fetching nearby vendors", error });
   }
 };
 
