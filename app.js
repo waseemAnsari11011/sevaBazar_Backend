@@ -4,7 +4,11 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
 const customerRoutes = require("./src/modules/Customer/route");
-const vendorRoutes = require("./src/modules/Vendor/route");
+const vendorAuthRoutes = require("./src/modules/Vendor/routes/vendor.auth.routes");
+const vendorAdminRoutes = require("./src/modules/Vendor/routes/vendor.admin.routes");
+const vendorCustomerRoutes = require("./src/modules/Vendor/routes/vendor.customer.routes");
+const vendorPrivateRoutes = require("./src/modules/Vendor/routes/vendor.private.routes");
+
 const ProductRoutes = require("./src/modules/Product/route");
 const CategoryRoutes = require("./src/modules/Category/route");
 const OrderRoutes = require("./src/modules/Order/route");
@@ -50,7 +54,19 @@ mongoose
 
 // Routes
 app.use(customerRoutes);
-app.use("/vendors", vendorRoutes);
+
+// Authentication routes
+app.use("/vendors/auth", vendorAuthRoutes);
+
+// Admin routes
+app.use("/vendors/admin", vendorAdminRoutes);
+
+// Customer routes
+app.use("/vendors/customer", vendorCustomerRoutes);
+
+// Vendor private routes
+app.use("/vendors/me", vendorPrivateRoutes);
+
 app.use(ProductRoutes);
 app.use(CategoryRoutes);
 app.use(OrderRoutes);

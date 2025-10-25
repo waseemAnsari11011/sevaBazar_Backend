@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
-const vendorController = require("./controller");
-const authorizeAdmin = require("../Middleware/authorizeMiddleware");
-const authenticateToken = require("../Middleware/authMiddleware");
-const handleS3Upload = require("../Middleware/s3UploadHandler");
+const vendorController = require("./src/modules/Vendor/controller");
+const authorizeAdmin = require("./src/modules/Middleware/authorizeMiddleware");
+const authenticateToken = require("./src/modules/Middleware/authMiddleware");
+const handleS3Upload = require("./src/modules/Middleware/s3UploadHandler");
 
 // Define the S3 folder name for vendor documents
 const S3_FOLDER = "vendor-documents";
@@ -36,7 +36,7 @@ router.post("/forgot-password", vendorController.forgotPassword);
 router.post("/reset-password/:token", vendorController.resetPassword);
 
 // =================================================================
-// PUBLIC VENDOR ROUTES (No Auth Required)
+// PUBLIC VENDOR ROUTES
 // =================================================================
 
 // Get all vendors (online + offline) - Customer app
