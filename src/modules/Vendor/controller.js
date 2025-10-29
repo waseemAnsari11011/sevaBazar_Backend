@@ -584,6 +584,121 @@ exports.toggleVendorStatus = async (req, res) => {
   }
 };
 
+exports.getAllVendorsGroupedByCategory = async (req, res) => {
+  console.log("getAllVendorsGroupedByCategory is called");
+  try {
+    // 1. Get the location filter from your utility
+    const locationFilter = await createLocationFilter(req);
+
+    // 2. If no filter (e.g., no active address), return an empty array
+    if (!locationFilter) {
+      return res.status(200).json([]);
+    }
+
+    // 3. Define the aggregation pipeline
+    const pipeline = [
+      {
+        // Stage 1: Find all vendors matching the user's location filter
+        $match: locationFilter,
+      },
+      {
+        // --- (NEW) Stage 2: Add a random sort field to each document ---
+        // This is the key to shuffling
+        $addFields: {
+          randomSort: { $rand: {} },
+        },
+      },
+      {
+        // --- (NEW) Stage 3: Sort by category, THEN by the random field ---
+        // This groups vendors by category, but randomizes their order *within* that category
+        $sort: {
+          category: 1,
+          randomSort: 1,
+        },
+      },
+      {
+        // Stage 4: Group the randomly-sorted vendors
+        $group: {
+          _id: "$category", // Group by the category ObjectId
+          // The 'vendors' array is now in a random order
+          vendors: { $push: "$$ROOT" },
+        },
+      },
+      {
+        // Stage 5: Populate the category details
+        $lookup: {
+          from: "categories",
+          localField: "_id",
+          foreignField: "_id",
+          as: "categoryDetails",
+        },
+      },
+      {
+        // Stage 6: Unwind the category details
+        $unwind: "$categoryDetails",
+      },
+      {
+        // --- (MODIFIED) Stage 7: Format output AND slice the vendors array ---
+        $project: {
+          _id: 0,
+          category: "$categoryDetails",
+          // --- OPTIMIZATION: Only send 4 random vendors ---
+          // This takes the full, randomized 'vendors' array and
+          // returns only the first 4 elements.
+          vendors: { $slice: ["$vendors", 4] },
+        },
+      },
+      {
+        // Stage 8: Sort the final list of *categories* by name
+        $sort: { "category.name": 1 },
+      },
+    ];
+
+    // 4. Execute the aggregation query
+    const categorizedVendors = await Vendor.aggregate(pipeline);
+
+    // 5. Post-process to remove sensitive data
+    // (This also includes the fix from your previous question to keep shopPhoto)
+    categorizedVendors.forEach((group) => {
+      // The 'vendors' array now only has 4 (or fewer) items
+      group.vendors.forEach((vendor) => {
+        vendor.password = undefined;
+        vendor.bankDetails = undefined;
+        vendor.resetPasswordToken = undefined;
+        vendor.resetPasswordExpires = undefined;
+        vendor.randomSort = undefined; // Remove the random field we added
+
+        // Specifically hide sensitive documents, but keep shopPhoto
+        if (vendor.documents) {
+          vendor.documents.selfiePhoto = undefined;
+          vendor.documents.aadharFrontDocument = undefined;
+          vendor.documents.aadharBackDocument = undefined;
+          vendor.documents.panCardDocument = undefined;
+        }
+        // Add any other sensitive fields you want to hide
+      });
+    });
+
+    res.status(200).json(categorizedVendors);
+  } catch (error) {
+    console.error("Error in getAllVendorsGroupedByCategory:", error);
+
+    // Error handling
+    if (error.message.includes("Authentication error")) {
+      return res.status(401).json({ message: error.message });
+    }
+    if (error.message.includes("Customer not found")) {
+      return res.status(404).json({ message: error.message });
+    }
+
+    // Generic fallback error
+    res.status(500).json({
+      message: "Error fetching vendors grouped by category",
+      error: error.message,
+    });
+  }
+};
+
 exports.getVendorsByCategory = async (req, res) => {
   console.log("getVendorsByCategory is called");
   try {

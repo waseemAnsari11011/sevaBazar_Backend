@@ -17,6 +17,13 @@ router.get(
   vendorController.getVendorsWithDiscounts
 );
 
+// Get all vendors, grouped by their category
+router.get(
+  "/all-by-category",
+  authenticateToken,
+  vendorController.getAllVendorsGroupedByCategory // <-- ADD THIS NEW ROUTE
+);
+
 // Get vendors by category
 router.get(
   "/by-category/:categoryId",
