@@ -394,19 +394,32 @@ exports.getVendorsWithDiscounts = async (req, res) => {
           },
         },
       },
-      // Stage 9: Sort vendors by their highest discount in descending order
-      { $sort: { maxDiscount: -1 } },
 
-      // Stage 10: Remove fields we added during the pipeline that we don't need
+      // --- MODIFICATION START ---
+
+      // Stage 9: Add a new field with a random value for sorting
+      {
+        $addFields: {
+          randomSort: { $rand: {} },
+        },
+      },
+
+      // Stage 10: Sort vendors randomly instead of by maxDiscount
+      { $sort: { randomSort: 1 } },
+
+      // Stage 11: Remove fields we added, including the temporary randomSort
       {
         $project: {
           products: 0,
           variations: 0,
           password: 0, // IMPORTANT: always exclude sensitive data
+          randomSort: 0, // Remove the temporary field
         },
       },
 
-      // Stage 11: Use $facet to get both total count and paginated data in one query
+      // --- MODIFICATION END ---
+
+      // Stage 12: Use $facet to get both total count and paginated data in one query
       {
         $facet: {
           metadata: [{ $count: "total" }],
