@@ -766,6 +766,59 @@ exports.getVendorDetails = async (req, res) => {
   }
 };
 
+// (Add this new function in controller.js)
+
+// Controller function for a vendor to update their own profile
+exports.updateVendorProfile = async (req, res) => {
+  console.log("updateVendorProfile is called");
+  // Get vendor ID from the authenticated token (authMiddleware)
+  const vendorId = req.user.id;
+
+  const updates = Object.keys(req.body);
+  // Define what a vendor is allowed to update about themselves
+  const allowedUpdates = ["name", "vendorInfo", "bankDetails", "upiDetails"];
+
+  try {
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) {
+      return res.status(404).send({ error: "Vendor not found." });
+    }
+
+    // Loop through the updates from req.body
+    for (const update of updates) {
+      if (!allowedUpdates.includes(update)) {
+        return res
+          .status(400)
+          .send({ error: `Invalid update attempt for: ${update}` });
+      }
+
+      // Handle nested objects like vendorInfo, bankDetails, upiDetails
+      if (typeof vendor[update] === "object" && vendor[update] !== null) {
+        // Merge the nested object
+        vendor[update] = { ...vendor[update], ...req.body[update] };
+      } else {
+        // Handle simple fields like 'name'
+        vendor[update] = req.body[update];
+      }
+    }
+
+    vendor.updatedAt = Date.now();
+    await vendor.save();
+
+    // Send back the updated vendor (excluding password)
+    const vendorResponse = vendor.toObject();
+    delete vendorResponse.password;
+
+    res.status(200).send({
+      message: "Profile updated successfully",
+      vendor: vendorResponse,
+    });
+  } catch (error) {
+    console.error("Update Vendor Profile Error:", error);
+    res.status(400).send({ error: error.message });
+  }
+};
+
 exports.updateVendorAddress = async (req, res) => {
   const { vendorId } = req.params;
   const { address, landmark, postalCode, latitude, longitude } = req.body;

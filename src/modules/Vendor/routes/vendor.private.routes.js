@@ -14,6 +14,9 @@ router.use(authenticateToken);
 // Toggle vendor status (on/off) by the vendor themselves
 router.patch("/toggle-status/:id", vendorController.toggleVendorStatus);
 
+// Route for a vendor to update their own profile
+router.put("/profile", authenticateToken, vendorController.updateVendorProfile);
+
 // Update own vendor profile
 router.put("/profile/:id", vendorController.updateVendor);
 
