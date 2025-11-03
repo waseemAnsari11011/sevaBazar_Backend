@@ -56,8 +56,7 @@ exports.createVendor = async (req, res) => {
     // Validate required files
     if (!req.files || !req.files.shopPhoto || !req.files.selfiePhoto) {
       return res.status(400).json({
-        message:
-          "All required documents must be uploaded (shop photo, selfie, and Aadhar/PAN document)",
+        message: "All required documents must be uploaded (shop photo, selfie)",
       });
     }
 
@@ -75,6 +74,15 @@ exports.createVendor = async (req, res) => {
       : null;
 
     const qrCodeUrl = req.files.qrCode ? req.files.qrCode[0].location : null;
+
+    // --- Get S3 URLs for new documents --- 👇
+    const gstCertificateUrl = req.files.gstCertificate
+      ? req.files.gstCertificate[0].location
+      : null;
+    const fssaiCertificateUrl = req.files.fssaiCertificate
+      ? req.files.fssaiCertificate[0].location
+      : null;
+    // --- End of Updates ---
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
@@ -107,6 +115,10 @@ exports.createVendor = async (req, res) => {
         aadharFrontDocument: aadharFrontDocumentUrl,
         aadharBackDocument: aadharBackDocumentUrl,
         panCardDocument: panCardDocumentUrl,
+        // --- Add new document URLs --- 👇
+        gstCertificate: gstCertificateUrl,
+        fssaiCertificate: fssaiCertificateUrl,
+        // --- End of Updates ---
       },
       bankDetails,
       upiDetails: {

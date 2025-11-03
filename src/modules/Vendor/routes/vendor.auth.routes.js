@@ -19,6 +19,8 @@ router.post(
     { name: "aadharBackDocument", maxCount: 1 },
     { name: "panCardDocument", maxCount: 1 },
     { name: "qrCode", maxCount: 1 },
+    { name: "gstCertificate", maxCount: 1 },
+    { name: "fssaiCertificate", maxCount: 1 },
   ]),
   vendorController.createVendor
 );

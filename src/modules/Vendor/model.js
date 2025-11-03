@@ -52,6 +52,14 @@ const vendorSchema = new Schema({
     panCardDocument: {
       type: String, //S3 URL
     },
+    // --- Updated Fields --- 👇
+    gstCertificate: {
+      type: String, // S3 URL for the PDF/image
+    },
+    fssaiCertificate: {
+      type: String, // S3 URL for the certificate
+    },
+    // --- End of Updates ---
   },
   bankDetails: {
     accountHolderName: {
