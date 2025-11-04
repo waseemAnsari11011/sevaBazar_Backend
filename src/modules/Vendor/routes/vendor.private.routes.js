@@ -17,9 +17,6 @@ router.patch("/toggle-status/:id", vendorController.toggleVendorStatus);
 // Route for a vendor to update their own profile
 router.put("/profile", authenticateToken, vendorController.updateVendorProfile);
 
-// Update own vendor profile
-router.put("/profile/:id", vendorController.updateVendor);
-
 // Update own vendor address
 router.put("/address/:vendorId", vendorController.updateVendorAddress);
 

@@ -179,6 +179,7 @@ exports.createVendor = async (req, res) => {
 // Controller function to update a vendor by ID
 exports.updateVendor = async (req, res) => {
   const updates = Object.keys(req.body);
+  // ... in exports.updateVendor
   const allowedUpdates = [
     "name",
     "email",
@@ -188,7 +189,10 @@ exports.updateVendor = async (req, res) => {
     "category",
     "isOnline",
     "status",
+    "bankDetails", // <-- Add this
+    "upiDetails", // <-- And this
   ];
+  // ...
   const isValidOperation = updates.every((update) =>
     allowedUpdates.includes(update)
   );
@@ -788,8 +792,14 @@ exports.updateVendorProfile = async (req, res) => {
 
   const updates = Object.keys(req.body);
   // Define what a vendor is allowed to update about themselves
-  const allowedUpdates = ["name", "vendorInfo", "bankDetails", "upiDetails"];
-
+  // NEW & IMPROVED
+  const allowedUpdates = [
+    "name",
+    "vendorInfo",
+    "bankDetails",
+    "upiDetails",
+    "location",
+  ];
   try {
     const vendor = await Vendor.findById(vendorId);
     if (!vendor) {
