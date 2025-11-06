@@ -3,9 +3,14 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-const Customer = require("../Customer/model.js");
 const createLocationFilter = require("../utils/locationFilter.js");
-const { Product, ProductVariation } = require("../Product/model.js");
+
+const {
+  normalizeFiles,
+  isFileUploaded,
+  extractS3KeyFromUrl,
+  deleteS3Objects,
+} = require("./helpers");
 
 require("dotenv").config();
 const secret = process.env.JWT_SECRET;
@@ -178,47 +183,289 @@ exports.createVendor = async (req, res) => {
 
 // Controller function to update a vendor by ID
 exports.updateVendor = async (req, res) => {
-  const updates = Object.keys(req.body);
-  // ... in exports.updateVendor
-  const allowedUpdates = [
-    "name",
-    "email",
-    "password",
-    "vendorInfo",
-    "location",
-    "category",
-    "isOnline",
-    "status",
-    "bankDetails", // <-- Add this
-    "upiDetails", // <-- And this
-  ];
-  // ...
-  const isValidOperation = updates.every((update) =>
-    allowedUpdates.includes(update)
-  );
-
-  if (!isValidOperation) {
-    return res.status(400).send({ error: "Invalid updates!" });
-  }
-
   try {
     const vendor = await Vendor.findById(req.params.id);
     if (!vendor) {
-      return res.status(404).send();
+      return res.status(404).send({ error: "Vendor not found" });
     }
 
-    if (updates.includes("password")) {
+    // Parse JSON fields if they exist (sent as strings from FormData)
+    const jsonFields = [
+      "vendorInfo",
+      "location",
+      "bankDetails",
+      "upiDetails",
+      "documents",
+      "documentActions", // NEW: Parse document actions
+    ];
+    jsonFields.forEach((field) => {
+      if (req.body[field] && typeof req.body[field] === "string") {
+        try {
+          req.body[field] = JSON.parse(req.body[field]);
+        } catch (e) {
+          console.error(`Error parsing ${field}:`, e);
+        }
+      }
+    });
+
+    // Get document actions (default to 'keep' if not provided)
+    const documentActions = req.body.documentActions || {};
+
+    // Track old S3 URLs for deletion
+    const oldS3Keys = [];
+
+    // Track which documents were uploaded as files
+    const uploadedDocumentFields = new Set();
+
+    // Normalize req.files to handle both array and object formats
+    const fileMap = normalizeFiles(req.files);
+
+    // Handle file uploads
+    if (fileMap) {
+      // Initialize documents object if it doesn't exist
+      if (!vendor.documents) {
+        vendor.documents = {};
+      }
+
+      // Handle document uploads (single files)
+      const documentFields = [
+        "selfiePhoto",
+        "aadharFrontDocument",
+        "aadharBackDocument",
+        "panCardDocument",
+        "gstCertificate",
+        "fssaiCertificate",
+      ];
+
+      documentFields.forEach((fieldName) => {
+        if (fileMap[fieldName] && fileMap[fieldName][0]) {
+          uploadedDocumentFields.add(fieldName);
+
+          const action = documentActions[fieldName] || "replace";
+
+          // Only process if action is 'replace'
+          if (action === "replace") {
+            // Delete old file from S3
+            if (vendor.documents[fieldName]) {
+              const oldKey = extractS3KeyFromUrl(vendor.documents[fieldName]);
+              if (oldKey) oldS3Keys.push(oldKey);
+            }
+            // Set new S3 URL
+            vendor.documents[fieldName] = fileMap[fieldName][0].location;
+          }
+        }
+      });
+
+      // Handle shopPhoto array (multiple images)
+      if (fileMap.shopPhoto && fileMap.shopPhoto.length > 0) {
+        uploadedDocumentFields.add("shopPhoto");
+
+        const action = documentActions.shopPhoto || "replace";
+
+        if (action === "replace") {
+          // DELETE old shop photos from S3
+          if (
+            vendor.documents.shopPhoto &&
+            Array.isArray(vendor.documents.shopPhoto)
+          ) {
+            vendor.documents.shopPhoto.forEach((url) => {
+              const oldKey = extractS3KeyFromUrl(url);
+              if (oldKey) oldS3Keys.push(oldKey);
+            });
+          }
+          // REPLACE with new shop photos
+          vendor.documents.shopPhoto = fileMap.shopPhoto.map(
+            (file) => file.location
+          );
+        } else if (action === "add") {
+          // ADD new photos to existing ones
+          const newUrls = fileMap.shopPhoto.map((file) => file.location);
+
+          if (
+            vendor.documents.shopPhoto &&
+            Array.isArray(vendor.documents.shopPhoto)
+          ) {
+            // Append new URLs to existing array
+            vendor.documents.shopPhoto = [
+              ...vendor.documents.shopPhoto,
+              ...newUrls,
+            ];
+          } else {
+            // No existing photos, just set the new ones
+            vendor.documents.shopPhoto = newUrls;
+          }
+        }
+        // If action is 'keep', we don't do anything
+      }
+
+      // Handle QR code upload
+      if (fileMap.qrCode && fileMap.qrCode[0]) {
+        const action = documentActions.qrCode || "replace";
+
+        if (action === "replace") {
+          // Delete old QR code from S3
+          if (vendor.upiDetails && vendor.upiDetails.qrCode) {
+            const oldKey = extractS3KeyFromUrl(vendor.upiDetails.qrCode);
+            if (oldKey) oldS3Keys.push(oldKey);
+          }
+          // Ensure upiDetails exists
+          if (!vendor.upiDetails) {
+            vendor.upiDetails = {};
+          }
+          vendor.upiDetails.qrCode = fileMap.qrCode[0].location;
+        }
+      }
+    }
+
+    // Handle direct URL updates from req.body.documents
+    // Only update fields that were NOT uploaded as files
+    if (req.body.documents) {
+      Object.keys(req.body.documents).forEach((key) => {
+        // Only update if this field was NOT uploaded as a file
+        if (!uploadedDocumentFields.has(key)) {
+          const action = documentActions[key] || "keep";
+
+          // Only update if action is not 'keep' or if URL has actually changed
+          if (
+            action !== "keep" &&
+            vendor.documents[key] !== req.body.documents[key]
+          ) {
+            // If replacing via URL, delete old S3 file
+            if (action === "replace" && vendor.documents[key]) {
+              const oldKey = extractS3KeyFromUrl(vendor.documents[key]);
+              if (oldKey) oldS3Keys.push(oldKey);
+            }
+            vendor.documents[key] = req.body.documents[key];
+          }
+        }
+      });
+    }
+
+    // Handle direct QR code URL update
+    if (req.body.upiDetails && req.body.upiDetails.qrCode) {
+      if (!vendor.upiDetails) {
+        vendor.upiDetails = {};
+      }
+
+      const action = documentActions.qrCode || "keep";
+
+      // Check if QR code was uploaded (works for both array and object formats)
+      const qrCodeUploaded =
+        req.files &&
+        ((Array.isArray(req.files) &&
+          req.files.some((f) => f.fieldname === "qrCode")) ||
+          (typeof req.files === "object" && req.files.qrCode));
+
+      // Only update if we didn't upload a file and action is not 'keep'
+      if (!qrCodeUploaded && action !== "keep") {
+        if (vendor.upiDetails.qrCode !== req.body.upiDetails.qrCode) {
+          // Delete old QR code if replacing
+          if (action === "replace" && vendor.upiDetails.qrCode) {
+            const oldKey = extractS3KeyFromUrl(vendor.upiDetails.qrCode);
+            if (oldKey) oldS3Keys.push(oldKey);
+          }
+          vendor.upiDetails.qrCode = req.body.upiDetails.qrCode;
+        }
+      }
+    }
+
+    // Define allowed updates
+    const allowedUpdates = [
+      "name",
+      "email",
+      "password",
+      "vendorInfo",
+      "location",
+      "category",
+      "isOnline",
+      "status",
+      "bankDetails",
+      "upiDetails",
+      "documents",
+    ];
+
+    // Apply updates from req.body (exclude documentActions)
+    const updates = Object.keys(req.body).filter(
+      (key) => key !== "documentActions"
+    );
+    const isValidOperation = updates.every((update) =>
+      allowedUpdates.includes(update)
+    );
+
+    if (!isValidOperation) {
+      return res.status(400).send({ error: "Invalid updates!" });
+    }
+
+    // Handle password hashing
+    if (req.body.password) {
       req.body.password = await bcrypt.hash(req.body.password, 10);
     }
 
-    updates.forEach((update) => (vendor[update] = req.body[update]));
+    // Apply all updates (except documents which we handled above)
+    updates.forEach((update) => {
+      if (update === "vendorInfo" && req.body.vendorInfo) {
+        vendor.vendorInfo = { ...vendor.vendorInfo, ...req.body.vendorInfo };
+      } else if (update === "location" && req.body.location) {
+        vendor.location = { ...vendor.location, ...req.body.location };
+        if (req.body.location.address) {
+          vendor.location.address = {
+            ...vendor.location.address,
+            ...req.body.location.address,
+          };
+        }
+      } else if (update === "bankDetails" && req.body.bankDetails) {
+        vendor.bankDetails = { ...vendor.bankDetails, ...req.body.bankDetails };
+      } else if (update === "upiDetails" && req.body.upiDetails) {
+        // Check if QR code was uploaded (works for both array and object formats)
+        const qrCodeUploaded =
+          req.files &&
+          ((Array.isArray(req.files) &&
+            req.files.some((f) => f.fieldname === "qrCode")) ||
+            (typeof req.files === "object" && req.files.qrCode));
+
+        const { qrCode, ...otherUpiDetails } = req.body.upiDetails;
+        vendor.upiDetails = {
+          ...vendor.upiDetails,
+          ...otherUpiDetails,
+          // Only update qrCode if it wasn't uploaded as a file
+          ...(qrCodeUploaded ? {} : { qrCode }),
+        };
+      } else if (update !== "documents") {
+        // Documents already handled above
+        vendor[update] = req.body[update];
+      }
+    });
+
+    // Update timestamp
     vendor.updatedAt = Date.now();
+
+    // Mark documents as modified to ensure Mongoose saves the changes
+    vendor.markModified("documents");
+    vendor.markModified("upiDetails");
+
+    // Save vendor
     await vendor.save();
 
-    // 👇 CHANGE HERE: Wrap the response in a 'vendor' object
+    // Delete old files from S3 after successful save
+    if (oldS3Keys.length > 0) {
+      try {
+        await deleteS3Objects(oldS3Keys);
+        console.log(
+          `Successfully deleted ${oldS3Keys.length} old files from S3`
+        );
+      } catch (error) {
+        console.error("Failed to delete old S3 objects:", error);
+        // Don't fail the request if S3 deletion fails
+      }
+    }
+
+    // Populate category before sending response
+    await vendor.populate("category", "name");
+
     res.status(200).send({ vendor });
   } catch (error) {
-    res.status(400).send(error);
+    console.error("Error updating vendor:", error);
+    res.status(400).send({ error: error.message || "Failed to update vendor" });
   }
 };
 
