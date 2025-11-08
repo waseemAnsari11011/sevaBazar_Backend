@@ -25,17 +25,17 @@ const vendorDocumentFields = [
 // Apply middleware to all admin routes
 router.use(authenticateToken, authorizeAdmin);
 
-router.put(
-  "/:id",
-  ...handleS3Upload("vendor-documents", vendorDocumentFields),
-  vendorController.updateVendor
-);
-
 // Get all vendors for Admin panel
 router.get("/", vendorController.getAllVendorsAdmin);
 
 // Get a specific vendor by ID
 router.get("/:vendorId", vendorController.getVendorById);
+
+router.put(
+  "/:id",
+  ...handleS3Upload("vendor-documents", vendorDocumentFields),
+  vendorController.updateVendor
+);
 
 // Delete vendor (admin only)
 router.delete("/:id", vendorController.deleteVendor);

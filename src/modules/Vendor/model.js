@@ -1,9 +1,18 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 const bcrypt = require("bcrypt");
+const crypto = require("crypto"); // Import built-in crypto module
 
 // Define the schema
 const vendorSchema = new Schema({
+  // --- Custom, human-readable ID ---
+  vendorId: {
+    type: String,
+    unique: true,
+    index: true,
+  },
+
+  // --- Basic Info ---
   name: {
     type: String,
   },
@@ -32,7 +41,7 @@ const vendorSchema = new Schema({
     },
   },
 
-  // Image uploads
+  // --- Image/Document Uploads ---
   documents: {
     shopPhoto: [
       {
@@ -52,15 +61,15 @@ const vendorSchema = new Schema({
     panCardDocument: {
       type: String, //S3 URL
     },
-    // --- Updated Fields --- 👇
     gstCertificate: {
       type: String, // S3 URL for the PDF/image
     },
     fssaiCertificate: {
       type: String, // S3 URL for the certificate
     },
-    // --- End of Updates ---
   },
+
+  // --- Payment Details ---
   bankDetails: {
     accountHolderName: {
       type: String,
@@ -86,6 +95,8 @@ const vendorSchema = new Schema({
       type: String, // S3 URL for the QR code image
     },
   },
+
+  // --- Status & Location ---
   isOnline: {
     type: Boolean,
     default: true,
@@ -95,8 +106,6 @@ const vendorSchema = new Schema({
     enum: ["online", "offline"],
     default: "online",
   },
-
-  // 👇 Location object now contains both the address and coordinates
   location: {
     type: {
       type: String,
@@ -112,7 +121,7 @@ const vendorSchema = new Schema({
         type: String,
       },
       addressLine2: String,
-      landmark: String, // Add landmark field
+      landmark: String,
       city: {
         type: String,
       },
@@ -126,18 +135,17 @@ const vendorSchema = new Schema({
         type: String,
       },
       postalCodes: {
-        // Add this field
         type: [String],
       },
     },
   },
 
+  // --- Other Fields ---
   category: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Category",
     required: true,
   },
-
   role: {
     type: String,
     default: "vendor",
@@ -146,12 +154,16 @@ const vendorSchema = new Schema({
     type: Boolean,
     default: false,
   },
+
+  // --- Password Reset ---
   resetPasswordToken: {
     type: String,
   },
   resetPasswordExpires: {
     type: Date,
   },
+
+  // --- Timestamps ---
   createdAt: {
     type: Date,
     default: Date.now,
@@ -161,6 +173,37 @@ const vendorSchema = new Schema({
     default: Date.now,
   },
 });
+
+// --- 👇 AUTOMATION LOGIC (PRE-SAVE HOOK) ---
+
+// Mongoose 'pre-save' hook to run logic before saving
+vendorSchema.pre("save", async function (next) {
+  // 'this' refers to the document being saved
+
+  // 1. Generate custom vendorId only for new documents
+  if (this.isNew) {
+    // Generate 4 random bytes, which gives an 8-character hex string
+    const randomId = crypto.randomBytes(4).toString("hex");
+    this.vendorId = `VND-${randomId}`; // e.g., "VND-1a2b3c4d"
+  }
+
+  // 2. Hash the password if it's new or modified
+  if (this.isModified("password") || this.isNew) {
+    try {
+      const salt = await bcrypt.genSalt(10);
+      this.password = await bcrypt.hash(this.password, salt);
+    } catch (error) {
+      return next(error); // Pass error to the save operation
+    }
+  }
+
+  // 3. Update the 'updatedAt' timestamp
+  this.updatedAt = Date.now();
+
+  next(); // Continue with the save operation
+});
+
+// --- End of Automation Logic ---
 
 // Method to compare passwords
 vendorSchema.methods.comparePassword = async function (candidatePassword) {
