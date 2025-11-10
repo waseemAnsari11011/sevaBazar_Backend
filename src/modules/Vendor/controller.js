@@ -776,21 +776,30 @@ exports.vendorLogin = async (req, res) => {
 
   try {
     let vendor = await Vendor.findOne({ email: emailOrPhone });
+
+    console.log("vendor email", vendor);
     if (!vendor) {
       vendor = await Vendor.findOne({
         "vendorInfo.contactNumber": emailOrPhone,
       });
     }
+    console.log("vendor phone", vendor);
 
     if (!vendor) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
+
     if (vendor.isRestricted) {
       return res.status(403).json({
         message: "Your account is restricted. Please contact support.",
       });
     }
+    console.log("till password match");
+
     const isPasswordMatch = await vendor.comparePassword(password);
+
+    console.log("isPasswordMatch", isPasswordMatch);
+
     if (!isPasswordMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
