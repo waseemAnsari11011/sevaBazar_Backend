@@ -89,9 +89,6 @@ exports.createVendor = async (req, res) => {
       : null;
     // --- End of Updates ---
 
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(req.body.password, 10);
-
     // Build the location object
     const locationData = location
       ? {
@@ -106,7 +103,7 @@ exports.createVendor = async (req, res) => {
     // Create a new vendor with the hashed password and document URLs
     const newVendor = new Vendor({
       name: req.body.name,
-      password: hashedPassword,
+      password: req.body.password,
       email: req.body.email,
       vendorInfo: vendorInfo,
       category: req.body.category,
@@ -801,7 +798,9 @@ exports.vendorLogin = async (req, res) => {
     console.log("isPasswordMatch", isPasswordMatch);
 
     if (!isPasswordMatch) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res
+        .status(401)
+        .json({ message: "password does not match credentials" });
     }
     const token = jwt.sign({ id: vendor._id, role: vendor.role }, secret);
     res
