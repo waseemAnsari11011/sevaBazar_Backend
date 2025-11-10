@@ -472,12 +472,24 @@ exports.updateVendor = async (req, res) => {
 // GET /vendors/search?q=...
 exports.searchVendors = async (req, res) => {
   try {
+    // 1. Get the search query 'q'
     const { q } = req.query;
     if (!q) {
       return res.status(400).json({ message: "Search query 'q' is required." });
     }
-    // 👇 MODIFIED: Search logic now includes address fields inside location
-    const vendors = await Vendor.find({
+
+    // 2. Get the location filter from the utility
+    // This filter already includes { status: 'online', isRestricted: false }
+    // and the $or logic for the customer's active address.
+    const locationFilter = await createLocationFilter(req);
+
+    // 3. If no location filter (e.g., no active address), return empty array
+    if (!locationFilter) {
+      return res.status(200).json([]);
+    }
+
+    // 4. Define the text search filter based on query 'q'
+    const searchFilter = {
       $or: [
         { name: new RegExp(q, "i") },
         { "vendorInfo.businessName": new RegExp(q, "i") },
@@ -485,14 +497,36 @@ exports.searchVendors = async (req, res) => {
         { "location.address.state": new RegExp(q, "i") },
         { "location.address.postalCode": new RegExp(q, "i") },
       ],
-    }).select("-password");
+    };
+
+    // 5. Combine both filters using $and
+    // This finds documents that match BOTH the locationFilter AND the searchFilter.
+    const finalQuery = {
+      $and: [locationFilter, searchFilter],
+    };
+
+    // 6. Execute the final query
+    const vendors = await Vendor.find(finalQuery).select("-password");
 
     res.status(200).json(vendors);
   } catch (error) {
-    res.status(500).json({ message: "Error searching vendors", error });
+    console.error("Error in searchVendors:", error);
+
+    // 7. Handle specific errors thrown by createLocationFilter
+    if (error.message.includes("Authentication error")) {
+      return res.status(401).json({ message: error.message });
+    }
+    if (error.message.includes("Customer not found")) {
+      return res.status(4404).json({ message: error.message });
+    }
+
+    // Generic fallback error
+    res.status(500).json({
+      message: "Error searching vendors",
+      error: error.message,
+    });
   }
 };
-
 // ======================================================= //
 // ======== NO CHANGES NEEDED FOR FUNCTIONS BELOW ======== //
 // ======================================================= //
@@ -513,27 +547,15 @@ exports.getAllVendors = async (req, res) => {
       return res.status(200).json({ total: 0, page, limit, vendors: [] });
     }
 
-    // 3. Base filter: only online, non-restricted vendors
-    const baseFilter = {
-      status: "online",
-      isRestricted: false,
-    };
-
-    // 4. Combine the base filter with the location filter
-    const finalFilter = {
-      ...baseFilter,
-      ...locationFilter, // Spread the { $or: [...] }
-    };
-
     // 5. Find vendors, sort by most recent, apply pagination
-    const vendors = await Vendor.find(finalFilter)
+    const vendors = await Vendor.find(locationFilter)
       .sort({ createdAt: -1 }) // Sort by creation date
       .skip((page - 1) * limit)
       .limit(limit)
       .select("-password"); // Exclude password
 
     // 6. Count total documents matching the filter for pagination metadata
-    const totalVendors = await Vendor.countDocuments(finalFilter);
+    const totalVendors = await Vendor.countDocuments(locationFilter);
 
     res.status(200).json({
       total: totalVendors,
@@ -597,18 +619,11 @@ exports.getVendorsWithDiscounts = async (req, res) => {
       return res.status(200).json({ total: 0, page, limit, vendors: [] });
     }
 
-    // 2. Base filter for vendors
-    const baseFilter = {
-      status: "online",
-      isRestricted: false,
-    };
-
     // 3. The Aggregation Pipeline
     const pipeline = [
       // Stage 1: Initial match on vendors (online, not restricted, and in the user's location)
       {
         $match: {
-          ...baseFilter,
           ...locationFilter,
         },
       },

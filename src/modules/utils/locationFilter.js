@@ -1,16 +1,17 @@
 const Customer = require("../Customer/model");
 
 /**
- * Generates a MongoDB location filter based on the authenticated customer's active shipping address.
+ * Generates a MongoDB filter that includes standard vendor requirements (online, unrestricted)
+ * AND location matching based on the authenticated customer's active shipping address.
+ *
  * @param {object} req - The Express request object (must contain req.user.id).
- * @returns {Promise<object | null>} A MongoDB query object (e.g., { $or: [...] }), or null if no active address is found or no address parts can be used.
- * @throws {Error} If customerId is missing or customer is not found, allowing the controller to handle HTTP responses.
+ * @returns {Promise<object | null>} A MongoDB query object (merged base filter + $or location), or null if no active address is found.
+ * @throws {Error} If customerId is missing or customer is not found.
  */
 const createLocationFilter = async (req) => {
   // 1. Get Customer ID from authenticated request
   const customerId = req.user?.id;
   if (!customerId) {
-    // This will be caught by the controller's try/catch
     throw new Error("Authentication error: Customer ID not found.");
   }
 
@@ -19,7 +20,6 @@ const createLocationFilter = async (req) => {
     "shippingAddresses"
   );
   if (!customer) {
-    // This will also be caught
     throw new Error("Customer not found.");
   }
 
@@ -30,13 +30,13 @@ const createLocationFilter = async (req) => {
 
   if (!activeAddress) {
     console.log("No active shipping address found for customer.");
-    return null; // No location to filter by
+    return null;
   }
 
   // 4. Prepare address tokens and postal code
   const { landmark, address, city, state, country, postalCode } = activeAddress;
   const fullAddressString = [landmark, address, city, state, country]
-    .filter(Boolean) // Remove any null/undefined parts
+    .filter(Boolean)
     .join(" ");
 
   const addressTokens = [
@@ -48,17 +48,16 @@ const createLocationFilter = async (req) => {
     ),
   ];
 
-  // 5. Build the core matching logic
+  // 5. Build the core location matching logic
   const matchConditions = [];
 
-  // Condition A: Match the vendor's postal code
+  // Condition A: Match postal code
   if (postalCode) {
     matchConditions.push({ "location.address.postalCode": postalCode });
-    // Also check against the array of postal codes the vendor serves
     matchConditions.push({ "location.address.postalCodes": postalCode });
   }
 
-  // Condition B: Match any of the address words in the vendor's address fields
+  // Condition B: Match address tokens
   if (addressTokens.length > 0) {
     const addressRegex = new RegExp(addressTokens.join("|"), "i");
     matchConditions.push({ "location.address.addressLine1": addressRegex });
@@ -66,12 +65,23 @@ const createLocationFilter = async (req) => {
     matchConditions.push({ "location.address.landmark": addressRegex });
   }
 
-  // 6. Return the filter or null
+  // 6. Return null if no location criteria could be built
   if (matchConditions.length === 0) {
-    return null; // No valid address parts to filter on
+    return null;
   }
 
-  return { $or: matchConditions };
+  // --- ADDED: Base Filter ---
+  // This ensures we only ever return vendors that are playable.
+  const baseFilter = {
+    status: "online",
+    isRestricted: false,
+  };
+
+  // 7. Return merged filter: Base requirements + Location ($or)
+  return {
+    ...baseFilter,
+    $or: matchConditions,
+  };
 };
 
 module.exports = createLocationFilter;

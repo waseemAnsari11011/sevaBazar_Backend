@@ -31,15 +31,15 @@ router.get(
   vendorController.getVendorsByCategory
 );
 
-// Search vendors (public or authenticated)
-router.get("/search", vendorController.searchVendors);
-
 // Search vendors within a specific category
 router.get(
   "/search/:categoryId",
   authenticateToken,
   vendorController.searchVendorsByCategory
 );
+
+// Search vendors (public or authenticated)
+router.get("/search", vendorController.searchVendors);
 
 // Get a single vendor's public details
 router.get("/:id/details", vendorController.getVendorDetails);
