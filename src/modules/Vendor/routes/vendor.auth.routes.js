@@ -5,15 +5,12 @@ const handleS3Upload = require("../../Middleware/s3UploadHandler");
 
 const S3_FOLDER = "vendor-documents";
 
-// =================================================================
-// VENDOR AUTHENTICATION ROUTES (No auth required)
-// =================================================================
-
 // Vendor Registration/Signup
 router.post(
   "/signup",
   handleS3Upload(S3_FOLDER, [
     { name: "shopPhoto", maxCount: 5 },
+    { name: "shopVideo", maxCount: 5 },
     { name: "selfiePhoto", maxCount: 1 },
     { name: "aadharFrontDocument", maxCount: 1 },
     { name: "aadharBackDocument", maxCount: 1 },

@@ -14,14 +14,18 @@ const s3Client = new S3Client({
 const multerUpload = multer({
   storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) {
+    // Accept both images and videos
+    if (
+      file.mimetype.startsWith("image/") ||
+      file.mimetype.startsWith("video/")
+    ) {
       cb(null, true);
     } else {
-      // For non-image files, you might want to handle them differently
-      // or reject them if you only want to allow images.
-      // For now, we allow them to pass through without compression.
-      cb(null, true);
+      cb(new Error("Only image and video files are allowed"));
     }
+  },
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit for videos
   },
 });
 
@@ -44,8 +48,9 @@ const compressAndUpload = (folderName) => async (req, res, next) => {
         const originalName = file.originalname;
         const uniqueName = `${folderName}/${Date.now()}_${originalName}`;
         let processedBuffer = file.buffer;
+        let contentType = file.mimetype;
 
-        // Compress images
+        // Compress ONLY images (not videos)
         if (file.mimetype.startsWith("image/")) {
           let sharpInstance = sharp(file.buffer).resize(1920, 1080, {
             fit: "inside",
@@ -74,12 +79,14 @@ const compressAndUpload = (folderName) => async (req, res, next) => {
               .toBuffer();
           }
         }
+        // For videos, use original buffer without compression
+        // (Video compression requires different libraries like ffmpeg)
 
         const uploadParams = {
           Bucket: process.env.AWS_S3_BUCKET_NAME,
           Key: uniqueName,
           Body: processedBuffer,
-          ContentType: file.mimetype,
+          ContentType: contentType,
         };
 
         const command = new PutObjectCommand(uploadParams);

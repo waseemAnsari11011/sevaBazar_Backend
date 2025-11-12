@@ -8,6 +8,7 @@ const handleS3Upload = require("../../Middleware/s3UploadHandler");
 // Define the fields configuration for S3 upload
 const vendorDocumentFields = [
   { name: "shopPhoto", maxCount: 10 }, // Multiple shop photos
+  { name: "shopVideo", maxCount: 10 }, // Multiple shop videos - ADDED THIS
   { name: "selfiePhoto", maxCount: 1 }, // Single selfie
   { name: "aadharFrontDocument", maxCount: 1 }, // Aadhar front
   { name: "aadharBackDocument", maxCount: 1 }, // Aadhar back

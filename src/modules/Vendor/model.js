@@ -48,6 +48,11 @@ const vendorSchema = new Schema({
         type: String, // S3 URL
       },
     ],
+    shopVideo: [
+      {
+        type: String, // S3 URL for the video
+      },
+    ],
     selfiePhoto: {
       type: String, // S3 URL
       required: true,

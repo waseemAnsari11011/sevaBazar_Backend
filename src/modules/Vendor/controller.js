@@ -7,7 +7,6 @@ const createLocationFilter = require("../utils/locationFilter.js");
 
 const {
   normalizeFiles,
-  isFileUploaded,
   extractS3KeyFromUrl,
   deleteS3Objects,
 } = require("./helpers");
@@ -67,6 +66,9 @@ exports.createVendor = async (req, res) => {
 
     // Get S3 URLs from uploaded files
     const shopPhotoUrls = req.files.shopPhoto.map((file) => file.location);
+    const shopVideoUrls = req.files.shopVideo
+      ? req.files.shopVideo.map((file) => file.location)
+      : [];
     const selfiePhotoUrl = req.files.selfiePhoto[0].location;
     const aadharFrontDocumentUrl = req.files.aadharFrontDocument
       ? req.files.aadharFrontDocument[0].location
@@ -113,6 +115,7 @@ exports.createVendor = async (req, res) => {
       location: locationData,
       documents: {
         shopPhoto: shopPhotoUrls,
+        shopVideo: shopVideoUrls,
         selfiePhoto: selfiePhotoUrl,
         aadharFrontDocument: aadharFrontDocumentUrl,
         aadharBackDocument: aadharBackDocumentUrl,
@@ -179,6 +182,7 @@ exports.createVendor = async (req, res) => {
 };
 
 // Controller function to update a vendor by ID
+// Controller function to update a vendor by ID
 exports.updateVendor = async (req, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id);
@@ -193,7 +197,7 @@ exports.updateVendor = async (req, res) => {
       "bankDetails",
       "upiDetails",
       "documents",
-      "documentActions", // NEW: Parse document actions
+      "documentActions",
     ];
     jsonFields.forEach((field) => {
       if (req.body[field] && typeof req.body[field] === "string") {
@@ -295,8 +299,50 @@ exports.updateVendor = async (req, res) => {
         // If action is 'keep', we don't do anything
       }
 
+      // Handle shopVideo array (multiple videos) - FIXED THIS SECTION
+      if (fileMap.shopVideo && fileMap.shopVideo.length > 0) {
+        uploadedDocumentFields.add("shopVideo");
+
+        const action = documentActions.shopVideo || "replace";
+
+        if (action === "replace") {
+          // DELETE old shop videos from S3
+          if (
+            vendor.documents.shopVideo &&
+            Array.isArray(vendor.documents.shopVideo)
+          ) {
+            vendor.documents.shopVideo.forEach((url) => {
+              const oldKey = extractS3KeyFromUrl(url);
+              if (oldKey) oldS3Keys.push(oldKey);
+            });
+          }
+          // REPLACE with new shop videos
+          vendor.documents.shopVideo = fileMap.shopVideo.map(
+            (file) => file.location
+          );
+        } else if (action === "add") {
+          // ADD new videos to existing ones
+          const newUrls = fileMap.shopVideo.map((file) => file.location);
+
+          if (
+            vendor.documents.shopVideo &&
+            Array.isArray(vendor.documents.shopVideo)
+          ) {
+            // Append new URLs to existing array
+            vendor.documents.shopVideo = [
+              ...vendor.documents.shopVideo,
+              ...newUrls,
+            ];
+          } else {
+            // No existing videos, just set the new ones
+            vendor.documents.shopVideo = newUrls;
+          }
+        }
+        // If action is 'keep', we don't do anything
+      }
+
       // Handle QR code upload
-      if (fileMap.qrCode && fileMap.qrCode[0]) {
+      if (fileMap.qrCode && fileMap[0]) {
         const action = documentActions.qrCode || "replace";
 
         if (action === "replace") {
