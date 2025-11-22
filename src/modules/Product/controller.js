@@ -61,11 +61,11 @@ exports.addProduct = async (req, res) => {
     const {
       name,
       description,
-      category,
       vendor,
+      vendorProductCategory,
       tags,
       isReturnAllowed,
-      isVisible, // ADDED: Handle visibility on creation
+      isVisible,
       arrivalDuration,
       variations: variationsJSON,
     } = req.body;
@@ -75,11 +75,11 @@ exports.addProduct = async (req, res) => {
     const newProduct = new Product({
       name,
       description,
-      category,
       vendor,
+      vendorProductCategory,
       tags,
       isReturnAllowed,
-      isVisible, // ADDED
+      isVisible,
       arrivalDuration,
       variations: [],
     });
@@ -138,11 +138,11 @@ exports.updateProductDetails = async (req, res) => {
     const allowedUpdates = {
       name: req.body.name,
       description: req.body.description,
-      category: req.body.category,
       vendor: req.body.vendor,
+      vendorProductCategory: req.body.vendorProductCategory,
       tags: req.body.tags,
       isReturnAllowed: req.body.isReturnAllowed,
-      isVisible: req.body.isVisible, // ADDED: Handle visibility updates
+      isVisible: req.body.isVisible,
       arrivalDuration: req.body.arrivalDuration,
     };
 
@@ -331,10 +331,10 @@ exports.getAllProductsVendor = async (req, res) => {
   try {
     const { vendorId } = req.params;
 
-    // Find all products and populate BOTH category and variations
+    // Find all products and populate variations and vendorProductCategory
     const products = await Product.find({ vendor: vendorId })
-      .populate("category") // Populates the category details
-      .populate("variations") // ✅ FIXED: Populates all associated variation details
+      .populate("variations")
+      .populate("vendorProductCategory")
       .sort({ createdAt: -1 });
 
     // Send response with the complete product and variation data
@@ -394,10 +394,10 @@ exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Find the product and populate its category AND variations
+    // Find the product and populate its variations and vendorProductCategory
     const product = await Product.findById(id)
-      .populate("category") // Gets category details
-      .populate("variations"); // ✅ FIXED: Gets all variation details
+      .populate("variations")
+      .populate("vendorProductCategory");
 
     if (!product) {
       return res.status(404).json({
