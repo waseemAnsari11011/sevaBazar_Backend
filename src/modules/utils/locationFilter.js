@@ -73,7 +73,7 @@ const createLocationFilter = async (req) => {
   // --- ADDED: Base Filter ---
   // This ensures we only ever return vendors that are playable.
   const baseFilter = {
-    status: "online",
+    // status: "online", // Removed to allow offline vendors to be shown (sorted to bottom)
     isRestricted: false,
   };
 
