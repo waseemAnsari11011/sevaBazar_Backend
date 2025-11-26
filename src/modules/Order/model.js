@@ -132,7 +132,7 @@ orderSchema.pre("validate", async function (next) {
   // Calculate the total amount for each product and set arrivalAt
   this.vendors.forEach((vendor) => {
     vendor.products.forEach((product) => {
-      const { availableLocalities } = product.product;
+      const availableLocalities = product.product.availableLocalities || [];
       product.totalAmount =
         (product.price - (product.price * product.discount) / 100) *
         product.quantity;

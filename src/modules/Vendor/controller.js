@@ -549,7 +549,9 @@ exports.searchVendors = async (req, res) => {
     };
 
     // 6. Execute the final query
-    const vendors = await Vendor.find(finalQuery).select("-password");
+    const vendors = await Vendor.find(finalQuery)
+      .sort({ isOnline: -1 })
+      .select("-password");
 
     res.status(200).json(vendors);
   } catch (error) {
@@ -592,7 +594,7 @@ exports.getAllVendors = async (req, res) => {
 
     // 5. Find vendors, sort by most recent, apply pagination
     const vendors = await Vendor.find(locationFilter)
-      .sort({ createdAt: -1 }) // Sort by creation date
+      .sort({ isOnline: -1, createdAt: -1 }) // Sort by online status then creation date
       .skip((page - 1) * limit)
       .limit(limit)
       .select("-password"); // Exclude password
@@ -719,9 +721,16 @@ exports.getVendorsWithDiscounts = async (req, res) => {
       // --- MODIFICATION START ---
 
       // Stage 9: Add a new field with a random value for sorting
+      // Online vendors get 0-1, Offline vendors get 2-3 (so they are always last)
       {
         $addFields: {
-          randomSort: { $rand: {} },
+          randomSort: {
+            $cond: {
+              if: { $eq: ["$isOnline", true] },
+              then: { $rand: {} },
+              else: { $add: [2, { $rand: {} }] },
+            },
+          },
         },
       },
 
@@ -949,8 +958,15 @@ exports.getAllVendorsGroupedByCategory = async (req, res) => {
       {
         // --- (NEW) Stage 2: Add a random sort field to each document ---
         // This is the key to shuffling
+        // Online vendors get 0-1, Offline vendors get 2-3 (so they are always last)
         $addFields: {
-          randomSort: { $rand: {} },
+          randomSort: {
+            $cond: {
+              if: { $eq: ["$isOnline", true] },
+              then: { $rand: {} },
+              else: { $add: [2, { $rand: {} }] },
+            },
+          },
         },
       },
       {
@@ -1065,7 +1081,9 @@ exports.getVendorsByCategory = async (req, res) => {
     };
 
     // 4. Find vendors matching the combined query
-    const vendors = await Vendor.find(finalQuery).select("-password");
+    const vendors = await Vendor.find(finalQuery)
+      .sort({ isOnline: -1 })
+      .select("-password");
 
     res.status(200).json(vendors);
   } catch (error) {
@@ -1311,7 +1329,7 @@ exports.searchVendorsByCategory = async (req, res) => {
     const vendors = await Vendor.find({
       category: categoryId,
       $or: [{ "vendorInfo.businessName": searchQuery }, { name: searchQuery }],
-    });
+    }).sort({ isOnline: -1 });
 
     res.status(200).json(vendors);
   } catch (error) {

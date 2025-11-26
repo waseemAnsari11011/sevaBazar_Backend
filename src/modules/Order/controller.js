@@ -1,5 +1,5 @@
 const Order = require('../Order/model');  // Adjust the path according to your project structure
-const Product = require('../Product/model');
+const { Product } = require('../Product/model');
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
@@ -131,9 +131,26 @@ exports.updatePaymentStatus = async (req, res) => {
             // Update product quantities and save the order to the database
             for (const vendor of vendors) {
                 for (const productInfo of vendor.products) {
-                    const product = await Product.findById(productInfo.product);
-                    product.quantity -= productInfo.quantity;
-                    await product.save();
+                    const product = await Product.findById(productInfo.product).populate('variations');
+                    
+                    if (product) {
+                        // Update variations
+                        for (const orderedVariation of productInfo.variations) {
+                            const productVariation = product.variations.find(
+                                variation => variation._id.toString() === orderedVariation._id
+                            );
+                            
+                            if (productVariation) {
+                                productVariation.quantity -= orderedVariation.quantity;
+                                await productVariation.save();
+                            }
+                        }
+
+                        // Update parent product quantity
+                        const totalQuantity = product.variations.reduce((sum, variation) => sum + variation.quantity, 0);
+                        product.quantity = totalQuantity;
+                        await product.save();
+                    }
                 }
             }
 
@@ -227,14 +244,16 @@ exports.createOrder = async (req, res) => {
         // Update product quantities and save the order to the database
         for (const vendor of vendors) {
             for (const productInfo of vendor.products) {
-                const product = await Product.findById(productInfo.product);
+                // Fetch product and populate variations
+                const product = await Product.findById(productInfo.product).populate('variations');
                 if (!product) {
                     return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
                 }
 
                 // Loop through each ordered variation
                 for (const orderedVariation of productInfo.variations) {
-                    // Find the matching variation in the product's variations
+                    // Find the matching variation in the product's populated variations
+                    // Note: orderedVariation._id is the variation ID
                     const productVariation = product.variations.find(
                         variation => variation._id.toString() === orderedVariation._id
                     );
@@ -243,23 +262,27 @@ exports.createOrder = async (req, res) => {
                         // Decrease the quantity of the matching variation by the ordered quantity
                         productVariation.quantity -= orderedVariation.quantity;
 
-                        // Check for negative quantity and handle it appropriately if needed
+                        // Check for negative quantity
                         if (productVariation.quantity < 0) {
                             return res.status(400).json({ error: `Insufficient quantity for variation ${orderedVariation._id}` });
                         }
+                        
+                        // Save the updated variation document
+                        await productVariation.save();
                     } else {
                         return res.status(400).json({ error: `Variation with ID ${orderedVariation._id} not found in product ${productInfo.product}` });
                     }
                 }
 
-                // Sum the quantities of all variations
-                const totalQuantity = product.variations.reduce((sum, variation) =>
-                    variation.parentVariation === null ? sum + variation.quantity : sum, 0);
+                // Recalculate total quantity from updated variations
+                // We need to re-fetch or use the updated instances
+                const totalQuantity = product.variations.reduce((sum, variation) => sum + variation.quantity, 0);
 
                 // Update the root-level quantity of the product
                 product.quantity = totalQuantity;
-                productInfo.name = product.name
-                // Save the updated product document back to the database
+                productInfo.name = product.name;
+                
+                // Save the updated product document
                 await product.save();
             }
         }
