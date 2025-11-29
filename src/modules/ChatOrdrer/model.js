@@ -100,13 +100,14 @@ orderSchema.pre('validate', async function (next) {
         }
 
         // Find the admin vendor
-        const adminVendor = await mongoose.models.Vendor.findOne({ role: 'admin' });
-        if (!adminVendor) {
-            return next(new Error('Admin vendor not found'));
+        if (!this.vendor) {
+            const adminVendor = await mongoose.models.Vendor.findOne({ role: 'admin' });
+            if (!adminVendor) {
+                return next(new Error('Admin vendor not found'));
+            }
+            // Set the vendor to admin
+            this.vendor = adminVendor._id;
         }
-
-        // Set the vendor to admin
-        this.vendor = adminVendor._id;
     }
 
     this.arrivalAt = new Date(Date.now() + 90 * 60 * 1000);

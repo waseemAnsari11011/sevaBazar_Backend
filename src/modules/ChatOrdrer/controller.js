@@ -29,6 +29,7 @@ const createChatOrder = async (req, res) => {
             name,
             shippingAddress,
             paymentStatus,
+            vendor: req.body.vendorId, // Assign the vendor if provided
             is_new: true
         });
 
@@ -194,22 +195,15 @@ const updateChatOrderStatus = async (req, res) => {
     console.log("orderId, newStatus==>>", orderId, newStatus);
 
     try {
-        // Find the admin vendor
-        const adminVendor = await Vendor.findOne({ role: 'admin' });
-
-        if (!adminVendor) {
-            return res.status(404).json({ error: 'Admin vendor not found' });
-        }
-
-        // Find the order by ID and update the status for the admin vendor
+        // Find the order by ID and update the status
         const order = await ChatOrder.findOneAndUpdate(
-            { _id: orderId, vendor: adminVendor._id },
+            { _id: orderId },
             { $set: { orderStatus: newStatus } },
             { new: true }
         );
 
         if (!order) {
-            return res.status(404).json({ error: 'Order not found or admin vendor not assigned to order' });
+            return res.status(404).json({ error: 'Order not found' });
         }
 
         // If the new status is 'Delivered', calculate and update deliveredInMin

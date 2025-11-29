@@ -83,9 +83,19 @@ app.use(VendorProductCategoryRoutes);
 
 // For any other route, serve the index.html file
 app.get("*", (req, res) => {
-  res.sendFile(
-    path.join(__dirname, "..", "sevabazar_panel", "build", "index.html")
-  );
+  console.log("404 Hit: ", req.originalUrl); // Log the URL that caused the fall-through
+  const indexPath = path.join(__dirname, "..", "sevabazar_panel", "build", "index.html");
+  
+  const fs = require('fs'); // Ensure fs is available
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({ 
+      error: "Not Found", 
+      message: "The requested resource was not found.",
+      path: req.originalUrl 
+    });
+  }
 });
 
 app.listen(port, () => {
