@@ -45,6 +45,10 @@ const productVariationSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  videos: {
+    type: [String],
+    default: [],
+  },
 });
 
 // =================================================================
@@ -93,6 +97,10 @@ const productSchema = new mongoose.Schema(
     ],
     arrivalDuration: {
       type: String,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
     },
   },
   {

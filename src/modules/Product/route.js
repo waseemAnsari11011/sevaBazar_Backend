@@ -13,6 +13,13 @@ const createProductUploadFields = () => {
         maxCount: 1,
       });
     }
+    // Allow up to 2 videos per variation
+    for (let videoIndex = 0; videoIndex < 2; videoIndex++) {
+      fields.push({
+        name: `variationVideo_${variationIndex}_${videoIndex}`,
+        maxCount: 1,
+      });
+    }
   }
   return fields;
 };
@@ -20,6 +27,7 @@ const createProductUploadFields = () => {
 // Middleware for updating a SINGLE variation's images
 const updateVariationUploadFields = [
   { name: "newImages", maxCount: 5 }, // Simple field name for new images
+  { name: "newVideos", maxCount: 2 }, // Simple field name for new videos
 ];
 
 // --- ROUTES ---

@@ -545,7 +545,7 @@ exports.searchVendors = async (req, res) => {
     // 5. Combine both filters using $and
     // This finds documents that match BOTH the locationFilter AND the searchFilter.
     const finalQuery = {
-      $and: [locationFilter, searchFilter],
+      $and: [locationFilter, searchFilter, { isDeleted: { $ne: true } }],
     };
 
     // 6. Execute the final query
@@ -593,14 +593,16 @@ exports.getAllVendors = async (req, res) => {
     }
 
     // 5. Find vendors, sort by most recent, apply pagination
-    const vendors = await Vendor.find(locationFilter)
+    // 5. Find vendors, sort by most recent, apply pagination
+    const vendors = await Vendor.find({ ...locationFilter, isDeleted: { $ne: true } })
       .sort({ isOnline: -1, createdAt: -1 }) // Sort by online status then creation date
       .skip((page - 1) * limit)
       .limit(limit)
       .select("-password"); // Exclude password
 
     // 6. Count total documents matching the filter for pagination metadata
-    const totalVendors = await Vendor.countDocuments(locationFilter);
+    // 6. Count total documents matching the filter for pagination metadata
+    const totalVendors = await Vendor.countDocuments({ ...locationFilter, isDeleted: { $ne: true } });
 
     res.status(200).json({
       total: totalVendors,
@@ -633,7 +635,8 @@ exports.getAllVendorsAdmin = async (req, res) => {
     // .select() is used to fetch only the fields required by the frontend.
     // This improves performance by not sending unnecessary data like password hashes.
     // .sort() orders the results, showing the most recently created vendors first.
-    const vendors = await Vendor.find({})
+    // .sort() orders the results, showing the most recently created vendors first.
+    const vendors = await Vendor.find({ isDeleted: { $ne: true } })
       .select(
         "name email vendorInfo.contactNumber location.address.postalCodes isRestricted"
       )
@@ -670,6 +673,7 @@ exports.getVendorsWithDiscounts = async (req, res) => {
       {
         $match: {
           ...locationFilter,
+          isDeleted: { $ne: true },
         },
       },
       // Stage 2: Join Vendor with Products
@@ -812,7 +816,11 @@ exports.getVendorById = async (req, res) => {
 // Controller function to delete a vendor by ID
 exports.deleteVendor = async (req, res) => {
   try {
-    const vendor = await Vendor.findByIdAndDelete(req.params.id);
+    const vendor = await Vendor.findByIdAndUpdate(
+      req.params.id,
+      { isDeleted: true },
+      { new: true }
+    );
     if (!vendor) {
       return res.status(404).send();
     }
@@ -953,7 +961,7 @@ exports.getAllVendorsGroupedByCategory = async (req, res) => {
     const pipeline = [
       {
         // Stage 1: Find all vendors matching the user's location filter
-        $match: locationFilter,
+        $match: { ...locationFilter, isDeleted: { $ne: true } },
       },
       {
         // --- (NEW) Stage 2: Add a random sort field to each document ---
@@ -1078,6 +1086,7 @@ exports.getVendorsByCategory = async (req, res) => {
     const finalQuery = {
       category: categoryId,
       ...locationFilter, // Spread the { $or: [...] } object
+      isDeleted: { $ne: true },
     };
 
     // 4. Find vendors matching the combined query
@@ -1320,7 +1329,7 @@ exports.searchVendorsByCategory = async (req, res) => {
 
     if (!q) {
       // If search query is empty, return all vendors for the category
-      const vendors = await Vendor.find({ category: categoryId });
+      const vendors = await Vendor.find({ category: categoryId, isDeleted: { $ne: true } });
       return res.status(200).json(vendors);
     }
 
@@ -1329,6 +1338,7 @@ exports.searchVendorsByCategory = async (req, res) => {
     const vendors = await Vendor.find({
       category: categoryId,
       $or: [{ "vendorInfo.businessName": searchQuery }, { name: searchQuery }],
+      isDeleted: { $ne: true },
     }).sort({ isOnline: -1 });
 
     res.status(200).json(vendors);

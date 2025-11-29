@@ -97,8 +97,11 @@ exports.addProduct = async (req, res) => {
         .json({ message: "At least one variation is required" });
     }
     const variationsToCreate = variationsData.map((variation, index) => {
-      const images = allVariationImages
+        const images = allVariationImages
         .filter((file) => file.fieldname.startsWith(`variationImage_${index}`))
+        .map((file) => file.location);
+      const videos = allVariationImages
+        .filter((file) => file.fieldname.startsWith(`variationVideo_${index}`))
         .map((file) => file.location);
       return {
         product: newProduct._id,
@@ -107,6 +110,7 @@ exports.addProduct = async (req, res) => {
         discount: variation.discount,
         quantity: variation.quantity,
         images: images,
+        videos: videos,
       };
     });
     const savedVariations = await ProductVariation.insertMany(
@@ -202,13 +206,19 @@ exports.addVariation = async (req, res) => {
       ? req.files.newImages.map((file) => file.location)
       : [];
 
+    const videos = req.files?.newVideos
+      ? req.files.newVideos.map((file) => file.location)
+      : [];
+
     const newVariation = new ProductVariation({
       product: product._id,
       attributes: parsedAttributes, // Will be [{name: "...", value: "..."}, ...]
       price: parseFloat(price),
       discount: parseFloat(discount) || 0,
       quantity: parseInt(quantity) || 0,
+      quantity: parseInt(quantity) || 0,
       images: images,
+      videos: videos,
     });
 
     const savedVariation = await newVariation.save({ session });
@@ -253,6 +263,11 @@ exports.updateVariation = async (req, res) => {
       ? req.files.newImages.map((file) => file.location)
       : [];
 
+    const existingVideos = JSON.parse(req.body.existingVideos || "[]");
+    const newVideos = req.files.newVideos
+      ? req.files.newVideos.map((file) => file.location)
+      : [];
+
     // Determine which images to delete from S3
     const imagesToDelete = variation.images.filter(
       (url) => !existingImages.includes(url)
@@ -268,11 +283,28 @@ exports.updateVariation = async (req, res) => {
       );
     }
 
+    // Determine which videos to delete from S3
+    const videosToDelete = variation.videos.filter(
+      (url) => !existingVideos.includes(url)
+    );
+
+    if (videosToDelete.length > 0) {
+      await Promise.all(
+        videosToDelete.map((url) => {
+          const s3Key = extractS3KeyFromUrl(url);
+          if (s3Key) return deleteS3Object(s3Key);
+          return Promise.resolve();
+        })
+      );
+    }
+
     // Update fields
     variation.price = price;
     variation.discount = discount;
     variation.quantity = quantity;
+    variation.quantity = quantity;
     variation.images = [...existingImages, ...newImages];
+    variation.videos = [...existingVideos, ...newVideos];
 
     // Just like in addVariation, this correctly parses the stringified array
     // of attribute objects from the form data.
@@ -310,7 +342,12 @@ exports.deleteProduct = async (req, res) => {
     }
 
     // Delete the product from the database
-    const deletedProduct = await Product.findByIdAndDelete(id);
+    // Delete the product from the database
+    const deletedProduct = await Product.findByIdAndUpdate(
+      id,
+      { isDeleted: true },
+      { new: true }
+    );
 
     // Send response confirming deletion
     res.status(200).json({
@@ -332,7 +369,8 @@ exports.getAllProductsVendor = async (req, res) => {
     const { vendorId } = req.params;
 
     // Find all products and populate variations and vendorProductCategory
-    const products = await Product.find({ vendor: vendorId })
+    // Find all products and populate variations and vendorProductCategory
+    const products = await Product.find({ vendor: vendorId, isDeleted: { $ne: true } })
       .populate("variations")
       .populate("vendorProductCategory")
       .sort({ createdAt: -1 });
@@ -357,7 +395,8 @@ exports.getProductsLowQuantity = async (req, res) => {
     const vendorId = req.params.vendorId; // Extract vendorId from request params
 
     // Find products for the specified vendor
-    const products = await Product.find({ vendor: vendorId }).lean();
+    // Find products for the specified vendor
+    const products = await Product.find({ vendor: vendorId, isDeleted: { $ne: true } }).lean();
 
     // Filter products where parent variation quantity is less than 10
     const lowQuantityProducts = products.filter((product) => {
@@ -443,6 +482,7 @@ exports.getProductsByCategoryId = async (req, res) => {
       availableLocalities: { $in: [userLocation, "all"] },
       quantity: { $gt: 0 }, // Ensure quantity is greater than 0
       isVisible: true,
+      isDeleted: { $ne: true },
     };
 
     // Perform the aggregation query
@@ -496,6 +536,7 @@ exports.getSimilarProducts = async (req, res) => {
       quantity: { $gt: 0 },
       isVisible: true,
       _id: { $ne: productId },
+      isDeleted: { $ne: true },
     })
       .skip((page - 1) * limit)
       .limit(limit);
@@ -505,6 +546,7 @@ exports.getSimilarProducts = async (req, res) => {
       availableLocalities: { $in: [userLocation, "all"] },
       quantity: { $gt: 0 },
       _id: { $ne: productId },
+      isDeleted: { $ne: true },
     });
 
     res.json({
@@ -531,8 +573,9 @@ exports.getRecentlyAddedProducts = async (req, res) => {
           availableLocalities: { $in: [userLocation, "all"] },
           quantity: { $gt: 0 },
           isVisible: true,
+          isDeleted: { $ne: true },
         }
-      : { quantity: { $gt: 0 }, isVisible: true };
+      : { quantity: { $gt: 0 }, isVisible: true, isDeleted: { $ne: true } };
 
     // Find the most recently added products with the location filter
     const recentlyAddedProducts = await Product.find(locationFilter)
@@ -569,8 +612,9 @@ exports.getDiscountedProducts = async (req, res) => {
           availableLocalities: { $in: [userLocation, "all"] },
           quantity: { $gt: 0 },
           isVisible: true,
+          isDeleted: { $ne: true },
         }
-      : { quantity: { $gt: 0 }, isVisible: true };
+      : { quantity: { $gt: 0 }, isVisible: true, isDeleted: { $ne: true } };
 
     // Combine the discount filter with the location filter
     const query = {
@@ -854,6 +898,7 @@ exports.getallCategoryProducts = async (req, res) => {
           availableLocalities: { $in: [userLocation, "all"] },
           category: category._id,
           isVisible: true,
+          isDeleted: { $ne: true },
         }).limit(4);
 
         // Return an object containing the category ID, name, and its products
@@ -941,6 +986,8 @@ exports.searchVendorProducts = async (req, res) => {
     const products = await Product.find({
       vendor: vendorId,
       name: new RegExp(q, "i"),
+      isVisible: true,
+      isDeleted: { $ne: true },
     });
 
     res.status(200).json(products);
@@ -956,6 +1003,8 @@ exports.getProductsByVendor = async (req, res) => {
     // Chain .populate() to the find query to include variation details
     const products = await Product.find({
       vendor: req.params.vendorId,
+      isVisible: true,
+      isDeleted: { $ne: true },
     }).populate("variations");
     res.json(products);
   } catch (error) {
