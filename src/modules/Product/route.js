@@ -60,6 +60,12 @@ router.put(
   handleS3Upload("products", updateVariationUploadFields),
   productController.updateVariation
 );
+
+// Delete a variation
+router.delete(
+  "/products/:productId/variations/:variationId",
+  productController.deleteVariation
+);
 router.get("/products/:vendorId", productController.getAllProductsVendor);
 router.get("/single-product/:id", productController.getProductById);
 

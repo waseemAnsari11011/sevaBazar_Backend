@@ -327,6 +327,65 @@ exports.updateVariation = async (req, res) => {
   }
 };
 
+// =================================================================
+// DELETE VARIATION from an existing product
+// =================================================================
+exports.deleteVariation = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { productId, variationId } = req.params;
+
+    const variation = await ProductVariation.findById(variationId).session(session);
+    if (!variation) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Variation not found" });
+    }
+
+    // Delete images from S3
+    if (variation.images && variation.images.length > 0) {
+      await Promise.all(
+        variation.images.map((url) => {
+          const s3Key = extractS3KeyFromUrl(url);
+          if (s3Key) return deleteS3Object(s3Key);
+          return Promise.resolve();
+        })
+      );
+    }
+
+    // Delete videos from S3
+    if (variation.videos && variation.videos.length > 0) {
+      await Promise.all(
+        variation.videos.map((url) => {
+          const s3Key = extractS3KeyFromUrl(url);
+          if (s3Key) return deleteS3Object(s3Key);
+          return Promise.resolve();
+        })
+      );
+    }
+
+    // Remove from Product
+    await Product.findByIdAndUpdate(
+      productId,
+      { $pull: { variations: variationId } },
+      { session }
+    );
+
+    // Delete Variation
+    await ProductVariation.findByIdAndDelete(variationId, { session });
+
+    await session.commitTransaction();
+    res.status(200).json({ message: "Variation deleted successfully" });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Failed to delete variation:", error);
+    res.status(500).json({ message: "Failed to delete variation", error: error.message });
+  } finally {
+    session.endSession();
+  }
+};
+
 // Controller function to delete a product by ID
 exports.deleteProduct = async (req, res) => {
   try {
