@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Category = require("../Category/model");
 const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { Product, ProductVariation } = require("./model");
+const VendorProductCategory = require("../VendorProductCategory/model");
 
 // Configure AWS S3 Client
 const s3Client = new S3Client({
@@ -70,13 +71,32 @@ exports.addProduct = async (req, res) => {
       variations: variationsJSON,
     } = req.body;
 
+    let finalVendorProductCategory = vendorProductCategory;
+
+    // If no category is selected, assign to "General"
+    if (!finalVendorProductCategory) {
+      let generalCategory = await VendorProductCategory.findOne({
+        vendor: vendor,
+        name: "General",
+      }).session(session);
+
+      if (!generalCategory) {
+        generalCategory = new VendorProductCategory({
+          name: "General",
+          vendor: vendor,
+        });
+        await generalCategory.save({ session });
+      }
+      finalVendorProductCategory = generalCategory._id;
+    }
+
     // ... (rest of the function is good)
 
     const newProduct = new Product({
       name,
       description,
       vendor,
-      vendorProductCategory,
+      vendorProductCategory: finalVendorProductCategory,
       tags,
       isReturnAllowed,
       isVisible,
@@ -153,6 +173,29 @@ exports.updateProductDetails = async (req, res) => {
     Object.keys(allowedUpdates).forEach(
       (key) => allowedUpdates[key] === undefined && delete allowedUpdates[key]
     );
+
+    // Check if vendorProductCategory is explicitly set to empty string or null (meaning user removed it)
+    if (
+      req.body.vendorProductCategory === "" ||
+      req.body.vendorProductCategory === null
+    ) {
+      const product = await Product.findById(id);
+      if (product) {
+        let generalCategory = await VendorProductCategory.findOne({
+          vendor: product.vendor,
+          name: "General",
+        });
+
+        if (!generalCategory) {
+          generalCategory = new VendorProductCategory({
+            name: "General",
+            vendor: product.vendor,
+          });
+          await generalCategory.save();
+        }
+        allowedUpdates.vendorProductCategory = generalCategory._id;
+      }
+    }
 
     const updatedProduct = await Product.findByIdAndUpdate(
       id,
