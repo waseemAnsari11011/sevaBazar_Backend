@@ -86,8 +86,9 @@ router.get(
   productController.getRecentlyAddedProducts
 );
 router.get("/onDiscountProducts", productController.getDiscountedProducts);
+router.get("/offered", productController.getOfferedProducts);
 router.get("/searchProducts", productController.fuzzySearchProducts);
-router.put("/update-arrival-duration", productController.updateArrivalDuration);
+router.get("/searchProducts", productController.fuzzySearchProducts);
 router.put(
   "/products/:productId/variations/:variationId",
   productController.updateVariationQuantity
@@ -109,5 +110,7 @@ router.get("/search", productController.searchVendorProducts);
 
 // Add the new route to fetch products for a specific vendor in a public context (customer view)
 router.get("/products/vendor/:vendorId", productController.getProductsByVendor);
+
+router.post("/products/update-quantities", productController.updateProductQuantities);
 
 module.exports = router;

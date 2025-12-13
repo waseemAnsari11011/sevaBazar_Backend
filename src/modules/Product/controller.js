@@ -67,7 +67,7 @@ exports.addProduct = async (req, res) => {
       tags,
       isReturnAllowed,
       isVisible,
-      arrivalDuration,
+      isOffered,
       variations: variationsJSON,
     } = req.body;
 
@@ -99,8 +99,9 @@ exports.addProduct = async (req, res) => {
       vendorProductCategory: finalVendorProductCategory,
       tags,
       isReturnAllowed,
+      isReturnAllowed,
       isVisible,
-      arrivalDuration,
+      isOffered: isOffered || false,
       variations: [],
     });
 
@@ -138,6 +139,11 @@ exports.addProduct = async (req, res) => {
       { session }
     );
     newProduct.variations = savedVariations.map((v) => v._id);
+    
+    // Calculate total quantity
+    const totalQuantity = savedVariations.reduce((sum, v) => sum + (v.quantity || 0), 0);
+    newProduct.quantity = totalQuantity;
+
     const savedProduct = await newProduct.save({ session });
     await session.commitTransaction();
     res.status(201).json({
@@ -166,8 +172,9 @@ exports.updateProductDetails = async (req, res) => {
       vendorProductCategory: req.body.vendorProductCategory,
       tags: req.body.tags,
       isReturnAllowed: req.body.isReturnAllowed,
+      isReturnAllowed: req.body.isReturnAllowed,
       isVisible: req.body.isVisible,
-      arrivalDuration: req.body.arrivalDuration,
+      isOffered: req.body.isOffered,
     };
 
     Object.keys(allowedUpdates).forEach(
@@ -267,6 +274,10 @@ exports.addVariation = async (req, res) => {
     const savedVariation = await newVariation.save({ session });
 
     product.variations.push(savedVariation._id);
+    
+    // Update product quantity
+    product.quantity = (product.quantity || 0) + (savedVariation.quantity || 0);
+    
     await product.save({ session });
 
     await session.commitTransaction();
@@ -357,6 +368,14 @@ exports.updateVariation = async (req, res) => {
 
     const updatedVariation = await variation.save();
 
+    // Update parent product quantity
+    const product = await Product.findById(variation.product).populate('variations');
+    if (product) {
+      const totalQuantity = product.variations.reduce((sum, v) => sum + (v.quantity || 0), 0);
+      product.quantity = totalQuantity;
+      await product.save();
+    }
+
     res.status(200).json({
       message: "Variation updated successfully",
       variation: updatedVariation,
@@ -414,6 +433,21 @@ exports.deleteVariation = async (req, res) => {
       { $pull: { variations: variationId } },
       { session }
     );
+
+    // Update product quantity
+    const product = await Product.findById(productId).session(session).populate('variations');
+    if (product) {
+       // Filter out the deleted variation from the in-memory array if populate included it (though pull should handle it, safer to recalc)
+       // Since we pulled it, we need to fetch fresh or just subtract. 
+       // Better to fetch fresh after pull, but we are in transaction.
+       // Actually, since we pulled from DB, let's just subtract the deleted variation quantity.
+       // But we need the current product quantity.
+       // Let's just re-calculate from remaining variations.
+       const remainingVariations = await ProductVariation.find({ product: productId }).session(session);
+       const totalQuantity = remainingVariations.reduce((sum, v) => sum + (v.quantity || 0), 0);
+       product.quantity = totalQuantity;
+       await product.save({ session });
+    }
 
     // Delete Variation
     await ProductVariation.findByIdAndDelete(variationId, { session });
@@ -581,7 +615,6 @@ exports.getProductsByCategoryId = async (req, res) => {
     // Define the match criteria for products
     const matchCriteria = {
       category: new mongoose.Types.ObjectId(categoryId),
-      availableLocalities: { $in: [userLocation, "all"] },
       quantity: { $gt: 0 }, // Ensure quantity is greater than 0
       isVisible: true,
       isDeleted: { $ne: true },
@@ -634,7 +667,6 @@ exports.getSimilarProducts = async (req, res) => {
     // Find other products in the same category, excluding the current product
     const similarProducts = await Product.find({
       category: product.category,
-      availableLocalities: { $in: [userLocation, "all"] },
       quantity: { $gt: 0 },
       isVisible: true,
       _id: { $ne: productId },
@@ -645,7 +677,6 @@ exports.getSimilarProducts = async (req, res) => {
 
     const totalSimilarProducts = await Product.countDocuments({
       category: product.category,
-      availableLocalities: { $in: [userLocation, "all"] },
       quantity: { $gt: 0 },
       _id: { $ne: productId },
       isDeleted: { $ne: true },
@@ -743,6 +774,40 @@ exports.getDiscountedProducts = async (req, res) => {
   }
 };
 
+// Get Offered Products
+exports.getOfferedProducts = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const userLocation = req.query.userLocation;
+
+    // Find products that are offered
+    const query = {
+      isOffered: true,
+      isVisible: true,
+      isDeleted: { $ne: true },
+    };
+
+    // Find products that are offered
+    const offeredProducts = await Product.find(query)
+      .populate("variations")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    const totalOfferedProducts = await Product.countDocuments(query);
+
+    res.json({
+      total: totalOfferedProducts,
+      page,
+      limit,
+      products: offeredProducts,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 //Fuzzy Search
 // controller.js
 exports.fuzzySearchProducts = async (req, res) => {
@@ -753,13 +818,7 @@ exports.fuzzySearchProducts = async (req, res) => {
     const regexQuery = new RegExp(searchQuery, "i"); // 'i' for case-insensitive
 
     // Construct the filter for availableLocalities
-    const locationFilter = userLocation
-      ? {
-          availableLocalities: { $in: [userLocation, "all"] },
-          quantity: { $gt: 0 },
-          isVisible: true,
-        }
-      : { quantity: { $gt: 0 }, isVisible: true };
+    const locationFilter = { quantity: { $gt: 0 }, isVisible: true };
 
     // Combine the search query with the location filter
     const query = {
@@ -773,6 +832,7 @@ exports.fuzzySearchProducts = async (req, res) => {
 
     // Find products that match the search query in the 'name', 'description' or 'tags', and match the location filter
     const results = await Product.find(query)
+      .populate("variations")
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
 
@@ -789,42 +849,7 @@ exports.fuzzySearchProducts = async (req, res) => {
   }
 };
 
-exports.updateArrivalDuration = async (req, res) => {
-  try {
-    // Fetch all products that do not have the arrivalDuration field set
-    const products = await Product.find({
-      $or: [{ arrivalDuration: { $exists: false } }, { arrivalDuration: null }],
-    });
 
-    // Update each product based on the custom pre-validate logic
-    const updatePromises = products.map(async (product) => {
-      const containsNumber = product.availableLocalities.some((loc) =>
-        /\d/.test(loc)
-      );
-      const containsAll = product.availableLocalities.includes("all");
-
-      if (containsAll && !containsNumber) {
-        product.arrivalDuration = "4 Days";
-      } else if (containsNumber) {
-        product.arrivalDuration = "90 Min";
-      }
-
-      return product.save();
-    });
-
-    // Wait for all updates to complete
-    await Promise.all(updatePromises);
-
-    res.status(200).json({
-      message: "Arrival duration updated for all applicable products.",
-    });
-  } catch (error) {
-    console.error(error);
-    res
-      .status(500)
-      .json({ error: "An error occurred while updating arrival duration." });
-  }
-};
 
 exports.updateVariationQuantity = async (req, res) => {
   try {
@@ -958,22 +983,24 @@ exports.getAllProducts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const userLocation = req.query.userLocation;
 
-    // Construct the filter for availableLocalities
-    const locationFilter = userLocation
-      ? {
-          availableLocalities: { $in: [userLocation, "all"] },
-          quantity: { $gt: 0 },
-          isVisible: true,
-        }
-      : { quantity: { $gt: 0 }, isVisible: true };
+    // Construct the filter
+    const filter = {
+      isVisible: true,
+    };
+
+    if (userLocation) {
+      // If availableLocalities existed, we would use it here.
+      // For now, assuming products are available everywhere or logic needs update.
+      // filter.availableLocalities = { $in: [userLocation, "all"] };
+    }
 
     // Find the most recently added products with the location filter
-    const products = await Product.find(locationFilter)
+    const products = await Product.find(filter)
       .skip((page - 1) * limit)
       .limit(limit);
 
     // Count the total number of products with the location filter
-    const totalProducts = await Product.countDocuments(locationFilter);
+    const totalProducts = await Product.countDocuments(filter);
 
     res.json({
       total: totalProducts,
@@ -997,7 +1024,6 @@ exports.getallCategoryProducts = async (req, res) => {
       categories.map(async (category) => {
         // Fetch a maximum of 4 products for each category
         const products = await Product.find({
-          availableLocalities: { $in: [userLocation, "all"] },
           category: category._id,
           isVisible: true,
           isDeleted: { $ne: true },
@@ -1111,5 +1137,28 @@ exports.getProductsByVendor = async (req, res) => {
     res.json(products);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateProductQuantities = async (req, res) => {
+  try {
+    const products = await Product.find({}).populate('variations');
+    let updatedCount = 0;
+
+    for (const product of products) {
+      let totalQuantity = 0;
+      if (product.variations && product.variations.length > 0) {
+        totalQuantity = product.variations.reduce((sum, v) => sum + (v.quantity || 0), 0);
+      }
+      
+      product.quantity = totalQuantity;
+      await product.save();
+      updatedCount++;
+    }
+
+    res.status(200).json({ message: `Updated quantities for ${updatedCount} products` });
+  } catch (error) {
+    console.error("Error updating product quantities:", error);
+    res.status(500).json({ message: "Failed to update product quantities", error: error.message });
   }
 };

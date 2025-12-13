@@ -39,7 +39,7 @@ router.get(
 );
 
 // Search vendors (public or authenticated)
-router.get("/search", vendorController.searchVendors);
+router.get("/search", authenticateToken, vendorController.searchVendors);
 
 // Get a single vendor's public details
 router.get("/:id/details", vendorController.getVendorDetails);

@@ -126,34 +126,25 @@ orderSchema.pre("validate", async function (next) {
   // Populate product references to get availableLocalities
   await this.populate({
     path: "vendors.products.product",
-    select: "availableLocalities",
   });
 
   // Calculate the total amount for each product and set arrivalAt
   this.vendors.forEach((vendor) => {
     vendor.products.forEach((product) => {
-      const availableLocalities = product.product.availableLocalities || [];
       product.totalAmount =
         (product.price - (product.price * product.discount) / 100) *
         product.quantity;
 
       const currentDay = new Date().getDay(); // 0 = Sunday, 6 = Saturday
 
-      const containsNumber = availableLocalities.some((loc) => /\d/.test(loc));
-      const containsAll = availableLocalities.includes("all");
-
-      if (containsAll && !containsNumber) {
-        if (currentDay === 6) {
-          // Saturday
-          product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
-        } else if (currentDay === 0) {
-          // Sunday
-          product.arrivalAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-        } else {
-          product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
-        }
-      } else if (containsNumber) {
-        product.arrivalAt = new Date(Date.now() + 90 * 60 * 1000); // 90 minutes
+      if (currentDay === 6) {
+        // Saturday
+        product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
+      } else if (currentDay === 0) {
+        // Sunday
+        product.arrivalAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+      } else {
+        product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
       }
     });
   });

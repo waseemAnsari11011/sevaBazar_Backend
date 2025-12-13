@@ -95,12 +95,18 @@ const productSchema = new mongoose.Schema(
         ref: "ProductVariation",
       },
     ],
-    arrivalDuration: {
-      type: String,
-    },
     isDeleted: {
       type: Boolean,
       default: false,
+    },
+    isOffered: {
+      type: Boolean,
+      default: false,
+    },
+    quantity: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   {
