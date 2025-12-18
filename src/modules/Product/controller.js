@@ -649,7 +649,7 @@ exports.getProductsByCategoryId = async (req, res) => {
     });
   }
 };
-// Get similar products based on the same category
+// Get similar products based on the same category and vendor
 exports.getSimilarProducts = async (req, res) => {
   try {
     console.log("api call");
@@ -664,23 +664,22 @@ exports.getSimilarProducts = async (req, res) => {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    // Find other products in the same category, excluding the current product
-    const similarProducts = await Product.find({
+    // Find other products in the same category AND same vendor, excluding the current product
+    const query = {
       category: product.category,
+      vendor: product.vendor, // 👈 Added vendor filter
       quantity: { $gt: 0 },
       isVisible: true,
       _id: { $ne: productId },
       isDeleted: { $ne: true },
-    })
+    };
+
+    const similarProducts = await Product.find(query)
+      .populate('variations')
       .skip((page - 1) * limit)
       .limit(limit);
 
-    const totalSimilarProducts = await Product.countDocuments({
-      category: product.category,
-      quantity: { $gt: 0 },
-      _id: { $ne: productId },
-      isDeleted: { $ne: true },
-    });
+    const totalSimilarProducts = await Product.countDocuments(query);
 
     res.json({
       total: totalSimilarProducts,

@@ -60,6 +60,10 @@ const orderSchema = new Schema({
       deliveredInMin: {
         type: Number,
       },
+      deliveryCharge: {
+        type: Number,
+        default: 0,
+      },
       orderStatus: {
         type: String,
         enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],

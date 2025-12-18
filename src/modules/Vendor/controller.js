@@ -98,6 +98,7 @@ exports.createVendor = async (req, res) => {
           coordinates: location.coordinates || [], // [lng, lat]
           address: {
             ...location.address,
+            postalCodes: location.address.postalCodes || [location.address.postalCode], // Default to primary if empty
           },
         }
       : undefined;
@@ -1186,7 +1187,7 @@ exports.updateVendorProfile = async (req, res) => {
 
 exports.updateVendorAddress = async (req, res) => {
   const { vendorId } = req.params;
-  const { address, landmark, postalCode, latitude, longitude } = req.body;
+  const { address, landmark, postalCode, latitude, longitude, postalCodes } = req.body;
 
   try {
     const vendor = await Vendor.findById(vendorId);
@@ -1198,6 +1199,8 @@ exports.updateVendorAddress = async (req, res) => {
     vendor.location.address.addressLine1 = address;
     vendor.location.address.landmark = landmark;
     vendor.location.address.postalCode = postalCode;
+    // Update postalCodes if provided, otherwise default to including only the primary postalCode
+    vendor.location.address.postalCodes = postalCodes || [postalCode];
     vendor.location.coordinates = [longitude, latitude];
 
     await vendor.save();

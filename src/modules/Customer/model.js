@@ -42,6 +42,12 @@ const customerSchema = new Schema({
       postalCode: {
         type: String,
       },
+      latitude: {
+        type: Number,
+      },
+      longitude: {
+        type: Number,
+      },
       isActive: {
         type: Boolean,
         default: false

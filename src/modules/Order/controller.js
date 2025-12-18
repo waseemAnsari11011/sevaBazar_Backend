@@ -5,6 +5,7 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const Vendor = require('../Vendor/model');
 const Customer = require('../Customer/model')
+const Settings = require('../Settings/model');
 const emailService = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushNotificationUtil');
 
@@ -49,6 +50,43 @@ exports.createOrderRazorpay = async (req, res) => {
             }
         }
 
+        // Fetch settings for delivery charge configuration
+        const settings = await Settings.findOne();
+        const deliveryChargeConfig = settings?.deliveryChargeConfig || [];
+
+        // Calculate delivery charges for each vendor
+        for (const vendor of vendors) {
+            const vendorDetails = await Vendor.findById(vendor.vendor);
+            if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates && shippingAddress.latitude && shippingAddress.longitude) {
+                const vendorLat = vendorDetails.location.coordinates[1];
+                const vendorLon = vendorDetails.location.coordinates[0];
+                const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
+                
+                let charge = 0;
+                
+                // Find matching rule
+                const match = deliveryChargeConfig.find(tier => {
+                    const type = tier.conditionType || 'range'; // Default to range for backward compatibility
+                    if (type === 'range') {
+                         return distance >= tier.minDistance && distance < tier.maxDistance;
+                    } else if (type === 'greaterThan') {
+                         return distance > tier.minDistance; // stored in minDistance or we can standardize
+                    } else if (type === 'lessThan') {
+                         return distance < tier.maxDistance; // stored in maxDistance
+                    }
+                    return false;
+                });
+
+                if (match) {
+                    charge = match.deliveryFee;
+                }
+                // If no match found, charge remains 0
+                vendor.deliveryCharge = charge;
+            } else {
+                vendor.deliveryCharge = 0; // Default if coordinates missing
+            }
+        }
+
         // Create a new order instance
         const newOrder = new Order({
             customer,
@@ -65,7 +103,11 @@ exports.createOrderRazorpay = async (req, res) => {
             vendor.products.forEach(product => {
                 totalAmount += product.totalAmount;
             });
+            totalAmount += (vendor.deliveryCharge || 0);
         });
+
+        const SHIPPING_FEE = 9;
+        totalAmount += SHIPPING_FEE;
 
         // Create Razorpay order
         const options = {
@@ -236,6 +278,40 @@ exports.createOrder = async (req, res) => {
                 if (!product.product || !product.quantity || !product.price || !product.variations) {
                     return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
                 }
+            }
+        }
+
+        // Fetch settings for delivery charge configuration
+        const settings = await Settings.findOne();
+        const deliveryChargeConfig = settings?.deliveryChargeConfig || [];
+
+        // Calculate delivery charges for each vendor
+        for (const vendor of vendors) {
+            const vendorDetails = await Vendor.findById(vendor.vendor);
+            if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates && shippingAddress.latitude && shippingAddress.longitude) {
+                const vendorLat = vendorDetails.location.coordinates[1];
+                const vendorLon = vendorDetails.location.coordinates[0];
+                const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
+                
+                let charge = 0;
+                const match = deliveryChargeConfig.find(tier => {
+                    const type = tier.conditionType || 'range';
+                    if (type === 'range') {
+                         return distance >= tier.minDistance && distance < tier.maxDistance;
+                    } else if (type === 'greaterThan') {
+                         return distance > tier.minDistance;
+                    } else if (type === 'lessThan') {
+                         return distance < tier.maxDistance;
+                    }
+                    return false;
+                });
+
+                if (match) {
+                    charge = match.deliveryFee;
+                }
+                vendor.deliveryCharge = charge;
+            } else {
+                vendor.deliveryCharge = 0;
             }
         }
 
@@ -800,13 +876,98 @@ exports.getUnacceptedOrders = async (req, res) => {
             orders: unacceptedOrders
         });
     } catch (error) {
+        console.error("Error fetching unaccepted orders:", error);
         res.status(500).json({
             success: false,
-            message: 'Server Error',
-            error: error.message
+            message: 'Server Error'
         });
     }
 };
+
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radius of the earth in km
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c; // Distance in km
+    return d;
+}
+
+function deg2rad(deg) {
+    return deg * (Math.PI / 180);
+}
+
+exports.calculateDeliveryCharge = async (req, res) => {
+    try {
+        const { vendors, shippingAddress, customerLat, customerLng } = req.body;
+
+        if (!vendors || !shippingAddress) {
+             // If lat/lng passed directly (e.g. form temporary state), use them. 
+             // Otherwise expect shippingAddress to have them.
+        }
+
+        const lat = shippingAddress?.latitude || customerLat;
+        const lng = shippingAddress?.longitude || customerLng;
+
+        if (!lat || !lng) {
+            return res.status(400).json({ error: 'Customer location (latitude/longitude) is required.' });
+        }
+
+        // Fetch settings
+        const settings = await Settings.findOne();
+        const deliveryChargeConfig = settings?.deliveryChargeConfig || [];
+
+        let totalDeliveryCharge = 0;
+        const charges = [];
+
+        for (const vendorId of vendors) {
+             // In checkout, vendors might be passed as an array of IDs or objects.
+             // Usually checkout passes cart items which are grouped by vendor? 
+             // Or let's assume input is array of vendor IDs. 
+             // Actually Checkout usually has full cart structure.
+             // Let's assume input `vendors` is an array of vendor IDs.
+             const vId = typeof vendorId === 'string' ? vendorId : vendorId.vendor;
+             const vendorDetails = await Vendor.findById(vId);
+
+             if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates) {
+                 const vendorLat = vendorDetails.location.coordinates[1];
+                 const vendorLon = vendorDetails.location.coordinates[0];
+                 const distance = calculateDistance(vendorLat, vendorLon, lat, lng);
+
+                 let charge = 0;
+                const match = deliveryChargeConfig.find(tier => {
+                    const type = tier.conditionType || 'range';
+                    if (type === 'range') {
+                         return distance >= tier.minDistance && distance < tier.maxDistance;
+                    } else if (type === 'greaterThan') {
+                         return distance > tier.minDistance;
+                    } else if (type === 'lessThan') {
+                         return distance < tier.maxDistance;
+                    }
+                    return false;
+                });
+                
+                if (match) {
+                    charge = match.deliveryFee;
+                }
+                
+                totalDeliveryCharge += charge;
+                charges.push({ vendor: vendorId, distance, charge });
+             }
+        }
+
+        res.status(200).json({ success: true, totalDeliveryCharge, charges });
+
+    } catch (error) {
+        console.error('Error calculating delivery charge:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
 
 
 exports.acceptOrder = async (req, res) => {

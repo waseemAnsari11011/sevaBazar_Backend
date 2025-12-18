@@ -23,6 +23,21 @@ const settingsSchema = new mongoose.Schema(
       required: true,
       default: 10, // Default distance in kilometers
     },
+    deliveryChargeConfig: {
+      type: [
+        {
+          conditionType: {
+            type: String,
+            enum: ["range", "greaterThan", "lessThan"],
+            default: "range",
+          },
+          minDistance: { type: Number, default: 0 },
+          maxDistance: { type: Number, default: 0 },
+          deliveryFee: { type: Number, required: true },
+        },
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );

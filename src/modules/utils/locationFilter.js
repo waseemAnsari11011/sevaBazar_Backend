@@ -33,47 +33,28 @@ const createLocationFilter = async (req) => {
     return null;
   }
 
-  // 4. Prepare address tokens and postal code
-  const { landmark, address, city, state, country, postalCode } = activeAddress;
-  const fullAddressString = [landmark, address, city, state, country]
-    .filter(Boolean)
-    .join(" ");
+  // 4. Get postal code from active address
+  const { postalCode } = activeAddress;
 
-  const addressTokens = [
-    ...new Set(
-      fullAddressString
-        .toLowerCase()
-        .split(/[\s,]+/)
-        .filter(Boolean)
-    ),
-  ];
+  if (!postalCode) {
+    console.log("No postal code found in active active address.");
+    return null;
+  }
 
-  // 5. Build the core location matching logic
+  // 5. Build the strict location matching logic
   const matchConditions = [];
 
-  // Condition A: Match postal code
-  if (postalCode) {
-    matchConditions.push({ "location.address.postalCode": postalCode });
-    matchConditions.push({ "location.address.postalCodes": postalCode });
-  }
+  // Match postal code against vendor's primary postal code OR their serviceable list
+  matchConditions.push({ "location.address.postalCode": postalCode });
+  matchConditions.push({ "location.address.postalCodes": postalCode });
 
-  // Condition B: Match address tokens
-  if (addressTokens.length > 0) {
-    const addressRegex = new RegExp(addressTokens.join("|"), "i");
-    matchConditions.push({ "location.address.addressLine1": addressRegex });
-    matchConditions.push({ "location.address.addressLine2": addressRegex });
-    matchConditions.push({ "location.address.landmark": addressRegex });
-  }
-
-  // 6. Return null if no location criteria could be built
+  // 6. Return null if no location criteria could be built (Defense in depth)
   if (matchConditions.length === 0) {
     return null;
   }
 
-  // --- ADDED: Base Filter ---
-  // This ensures we only ever return vendors that are playable.
+  // --- Base Filter ---
   const baseFilter = {
-    // status: "online", // Removed to allow offline vendors to be shown (sorted to bottom)
     isRestricted: false,
   };
 

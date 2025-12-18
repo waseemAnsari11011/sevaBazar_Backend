@@ -250,6 +250,8 @@ exports.saveAddressAndLocalities = async (req, res) => {
       postalCode,
       name,
       phone,
+      latitude,
+      longitude,
     } = req.body;
     const { id } = req.params; // Assuming userId is passed in the URL params or request body
 
@@ -272,6 +274,8 @@ exports.saveAddressAndLocalities = async (req, res) => {
         state,
         country,
         postalCode,
+        latitude,
+        longitude,
         isActive: true, // Set isActive to true for the first address
       };
       user.shippingAddresses.push(newAddress);
@@ -286,6 +290,8 @@ exports.saveAddressAndLocalities = async (req, res) => {
         state,
         country,
         postalCode,
+        latitude,
+        longitude,
       };
       user.shippingAddresses.push(newAddress);
     }
@@ -319,6 +325,8 @@ exports.updateShippingAddress = async (req, res) => {
       postalCode,
       name,
       phone,
+      latitude,
+      longitude,
       isActive,
     } = req.body;
 
@@ -351,6 +359,8 @@ exports.updateShippingAddress = async (req, res) => {
       state,
       country,
       postalCode,
+      latitude,
+      longitude,
       isActive,
     };
 
