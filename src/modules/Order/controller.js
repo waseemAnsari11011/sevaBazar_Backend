@@ -293,6 +293,8 @@ exports.createOrder = async (req, res) => {
                 const vendorLon = vendorDetails.location.coordinates[0];
                 const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
                 
+                vendor.distance = distance; // Save the distance
+
                 let charge = 0;
                 const match = deliveryChargeConfig.find(tier => {
                     const type = tier.conditionType || 'range';
@@ -665,6 +667,21 @@ exports.updateOrderStatus = async (req, res) => {
             return res.status(404).json({ error: 'Order or vendor not found' });
         }
 
+        // If the new status is 'Shipped', set arrivalAt to 15 minutes from now
+        if (newStatus === 'Shipped') {
+            const deliveryTime = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+            
+            order.vendors.forEach(vendor => {
+                if (vendor.vendor.equals(vendorId)) {
+                    vendor.products.forEach(product => {
+                        product.arrivalAt = deliveryTime;
+                    });
+                }
+            });
+             // Save the updated arrival times
+             await order.save();
+        }
+
         // If the new status is 'Delivered', calculate and update deliveredInMin at the vendor level
         if (newStatus === 'Delivered') {
             const currentTime = new Date();
@@ -807,7 +824,12 @@ exports.getOrdersByCustomerId = async (req, res) => {
         })
             .populate('customer')
             .populate('vendors.vendor')
-            .populate('vendors.products.product')
+            .populate({
+                path: 'vendors.products.product',
+                populate: {
+                    path: 'variations'
+                }
+            })
             .sort({ createdAt: -1 }) // Sort by createdAt in descending order (latest to oldest)
             .exec();
 
@@ -826,7 +848,12 @@ exports.getOrdersHistoryByCustomerId = async (req, res) => {
         })
             .populate('customer')
             .populate('vendors.vendor')
-            .populate('vendors.products.product')
+            .populate({
+                path: 'vendors.products.product',
+                populate: {
+                    path: 'variations'
+                }
+            })
             .sort({ createdAt: -1 }) // Sort by createdAt in descending order (latest to oldest)
             .exec();
 

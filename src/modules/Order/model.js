@@ -64,6 +64,9 @@ const orderSchema = new Schema({
         type: Number,
         default: 0,
       },
+      distance: {
+        type: Number,
+      },
       orderStatus: {
         type: String,
         enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],

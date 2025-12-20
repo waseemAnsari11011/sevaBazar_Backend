@@ -21,7 +21,9 @@ const ChatOrder = require("./src/modules/ChatOrdrer/route");
 const deliveryRoutes = require("./src/modules/Delivery/route");
 const settingsRoutes = require("./src/modules/Settings/route");
 const VendorProductCategoryRoutes = require("./src/modules/VendorProductCategory/route");
+const TicketRoutes = require("./src/modules/Ticket/route");
 
+// Initializing express application
 const app = express();
 // More robust CORS configuration
 app.use(
@@ -79,7 +81,10 @@ app.use(BannerRoutes);
 app.use(ChatOrder);
 app.use(deliveryRoutes);
 app.use("/settings", settingsRoutes);
+app.use("/tickets", TicketRoutes);
 app.use(VendorProductCategoryRoutes);
+
+console.log("Ticket Routes Registered");
 
 // For any other route, serve the index.html file
 app.get("*", (req, res) => {
