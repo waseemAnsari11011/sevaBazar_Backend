@@ -63,7 +63,7 @@ exports.sendNewOrderNotificationEmail = async (vendorEmail, orderDetails, custom
                                 ${vendor.products.map(product => `
                                     <p><strong>${product.quantity}x ${product.name}</strong></p>
                                     <p><em>Attributes:</em> ${product.variations.map(variation => `
-                                        ${variation.attributes.selected}: ${variation.attributes.value}
+                                        ${variation.attributes.map(attr => `${attr.name}: ${attr.value}`).join(', ')}
                                     `).join(', ')}</p>
                                 `).join('')}
                             </td>
