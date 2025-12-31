@@ -91,7 +91,8 @@ exports.createOrderRazorpay = async (req, res) => {
         const newOrder = new Order({
             customer,
             vendors,
-            shippingAddress
+            shippingAddress,
+            shippingFee: 9 // Fixed shipping fee
         });
 
         // Save the order to the database
@@ -370,7 +371,8 @@ exports.createOrder = async (req, res) => {
             customer,
             vendors,
             shippingAddress,
-            name: customerDetails.name
+            name: customerDetails.name,
+            shippingFee: 9 // Fixed shipping fee
         });
 
         console.log("vendor-->>", vendors[0].products)

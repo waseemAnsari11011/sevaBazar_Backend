@@ -67,6 +67,10 @@ const orderSchema = new Schema({
       distance: {
         type: Number,
       },
+      shippingFee: {
+        type: Number,
+        default: 0,
+      },
       orderStatus: {
         type: String,
         enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],

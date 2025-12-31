@@ -58,6 +58,17 @@ const orderSchema = new Schema({
         type: Boolean,
         default: true
     },
+    deliveryCharge: {
+        type: Number,
+        default: 0
+    },
+    distance: {
+        type: Number
+    },
+    shippingFee: {
+        type: Number,
+        default: 0
+    },
     createdAt: {
         type: Date,
         default: Date.now

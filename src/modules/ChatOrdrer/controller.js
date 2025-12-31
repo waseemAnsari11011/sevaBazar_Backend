@@ -5,6 +5,21 @@ const mongoose = require('mongoose');
 const emailService = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushNotificationUtil');
 
+const Settings = require('../Settings/model');
+
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const toRad = (value) => (value * Math.PI) / 180;
+    const R = 6371; // Radius of the Earth in km
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in km
+}
+
 // Function to create a new ChatOrder
 const createChatOrder = async (req, res) => {
     console.log("api is hiiting")
@@ -21,6 +36,42 @@ const createChatOrder = async (req, res) => {
             return res.status(404).json({ message: 'Customer not found' });
         }
 
+
+        // Calculate Delivery Charge
+        const vendorId = req.body.vendorId;
+        const vendorDetails = await Vendor.findById(vendorId);
+        
+        let deliveryCharge = 0;
+        let distance = 0;
+
+        if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates && shippingAddress.latitude && shippingAddress.longitude) {
+            const vendorLat = vendorDetails.location.coordinates[1];
+            const vendorLon = vendorDetails.location.coordinates[0];
+            distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
+            
+            // Fetch settings for delivery charge configuration
+            const settings = await Settings.findOne();
+            const deliveryChargeConfig = settings?.deliveryChargeConfig || [];
+            
+             const match = deliveryChargeConfig.find(tier => {
+                const type = tier.conditionType || 'range';
+                if (type === 'range') {
+                        return distance >= tier.minDistance && distance < tier.maxDistance;
+                } else if (type === 'greaterThan') {
+                        return distance > tier.minDistance;
+                } else if (type === 'lessThan') {
+                        return distance < tier.maxDistance;
+                }
+                return false;
+            });
+
+            if (match) {
+                deliveryCharge = match.deliveryFee;
+            }
+        }
+
+const SHIPPING_FEE = 9;
+
         // Create a new chat order
         const newChatOrder = new ChatOrder({
 
@@ -30,7 +81,10 @@ const createChatOrder = async (req, res) => {
             shippingAddress,
             paymentStatus,
             vendor: req.body.vendorId, // Assign the vendor if provided
-            is_new: true
+            is_new: true,
+            deliveryCharge,
+            distance,
+            shippingFee: SHIPPING_FEE
         });
 
         // Save the order to the database
@@ -40,7 +94,7 @@ const createChatOrder = async (req, res) => {
 
 
         // Fetch the vendor's role using the vendorId
-        const vendorDetails = await Vendor.findById(savedOrder.vendor)
+        // const vendorDetails = await Vendor.findById(savedOrder.vendor)
         const customerDetails = await Customer.findById(savedOrder.customer)
 
         // console.log("vendorDetails->", vendorDetails)
@@ -195,10 +249,16 @@ const updateChatOrderStatus = async (req, res) => {
     console.log("orderId, newStatus==>>", orderId, newStatus);
 
     try {
+        // Prepare the update object
+        let updateData = { orderStatus: newStatus };
+        if (newStatus === 'Shipped') {
+            updateData.arrivalAt = new Date(Date.now() + 15 * 60 * 1000); // Set arrival time to 15 minutes from now
+        }
+
         // Find the order by ID and update the status
         const order = await ChatOrder.findOneAndUpdate(
             { _id: orderId },
-            { $set: { orderStatus: newStatus } },
+            { $set: updateData },
             { new: true }
         );
 
