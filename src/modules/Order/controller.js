@@ -348,6 +348,11 @@ exports.createOrder = async (req, res) => {
                         
                         // Save the updated variation document
                         await productVariation.save();
+
+                        // Update discount
+                        if (productVariation.discount && productVariation.discount > 0) {
+                            productInfo.discount = Math.max(productInfo.discount || 0, productVariation.discount);
+                        }
                     } else {
                         return res.status(400).json({ error: `Variation with ID ${orderedVariation._id} not found in product ${productInfo.product}` });
                     }

@@ -78,6 +78,10 @@ const orderSchema = new Schema({
       },
     },
   ],
+  shippingFee: {
+    type: Number,
+    default: 0,
+  },
   shippingAddress: mongoose.Schema.Types.Mixed,
   isPaymentVerified: {
     type: Boolean,

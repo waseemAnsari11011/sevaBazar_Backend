@@ -206,6 +206,7 @@ const getChatOrdersByCustomer = async (req, res) => {
             orderStatus: { $nin: ['Delivered', 'Cancelled'] }
         })
         .populate('customer')
+        .populate('vendor')
         .sort({ createdAt: -1 });
 
         return res.status(200).json(chatOrders);
@@ -231,6 +232,7 @@ const getChatOrdersHistoryByCustomer = async (req, res) => {
             orderStatus: { $in: ['Delivered', 'Cancelled'] }
         })
         .populate('customer')
+        .populate('vendor')
         .sort({ createdAt: -1 });
         
 
