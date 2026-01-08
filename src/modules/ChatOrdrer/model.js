@@ -121,7 +121,7 @@ orderSchema.pre('validate', async function (next) {
         }
     }
 
-    this.arrivalAt = new Date(Date.now() + 90 * 60 * 1000);
+
 
     next();
 });

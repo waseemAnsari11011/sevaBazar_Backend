@@ -150,17 +150,7 @@ orderSchema.pre("validate", async function (next) {
         (product.price - (product.price * product.discount) / 100) *
         product.quantity;
 
-      const currentDay = new Date().getDay(); // 0 = Sunday, 6 = Saturday
 
-      if (currentDay === 6) {
-        // Saturday
-        product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
-      } else if (currentDay === 0) {
-        // Sunday
-        product.arrivalAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-      } else {
-        product.arrivalAt = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
-      }
     });
   });
 
