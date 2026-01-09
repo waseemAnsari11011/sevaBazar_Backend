@@ -27,6 +27,9 @@ const customerSchema = new Schema({
       landmark: {
         type: String,
       },
+      addressDescription: {
+        type: String,
+      },
       address: {
         type: String,
       },

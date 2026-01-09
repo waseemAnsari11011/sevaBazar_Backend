@@ -639,7 +639,7 @@ exports.getAllVendorsAdmin = async (req, res) => {
     // .sort() orders the results, showing the most recently created vendors first.
     const vendors = await Vendor.find({ isDeleted: { $ne: true } })
       .select(
-        "name email vendorInfo.contactNumber location.address.postalCodes isRestricted"
+        "name email vendorInfo.contactNumber vendorInfo.businessName location.address.postalCodes isRestricted"
       )
       .sort({ createdAt: -1 });
 

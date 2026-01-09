@@ -242,6 +242,7 @@ exports.sendOtp = async (req, res) => {
 exports.saveAddressAndLocalities = async (req, res) => {
   try {
     const {
+      addressDescription,
       addressLine1,
       landmark,
       city,
@@ -268,6 +269,7 @@ exports.saveAddressAndLocalities = async (req, res) => {
       const newAddress = {
         name,
         phone,
+        addressDescription,
         address: addressLine1,
         landmark,
         city,
@@ -284,6 +286,7 @@ exports.saveAddressAndLocalities = async (req, res) => {
       const newAddress = {
         name,
         phone,
+        addressDescription,
         address: addressLine1,
         landmark,
         city,
@@ -317,6 +320,7 @@ exports.updateShippingAddress = async (req, res) => {
   try {
     const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
     const {
+      addressDescription,
       addressLine1,
       landmark,
       city,
@@ -353,6 +357,7 @@ exports.updateShippingAddress = async (req, res) => {
       ...user.shippingAddresses[addressIndex],
       name,
       phone,
+      addressDescription,
       address: addressLine1,
       landmark,
       city,
