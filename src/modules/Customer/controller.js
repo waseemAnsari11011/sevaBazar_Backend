@@ -263,41 +263,24 @@ exports.saveAddressAndLocalities = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if shippingAddresses array is empty
-    if (user.shippingAddresses.length === 0) {
-      // If empty, set isActive to true for the new address
-      const newAddress = {
-        name,
-        phone,
-        addressDescription,
-        address: addressLine1,
-        landmark,
-        city,
-        state,
-        country,
-        postalCode,
-        latitude,
-        longitude,
-        isActive: true, // Set isActive to true for the first address
-      };
-      user.shippingAddresses.push(newAddress);
-    } else {
-      // If not empty, add the new address with isActive false
-      const newAddress = {
-        name,
-        phone,
-        addressDescription,
-        address: addressLine1,
-        landmark,
-        city,
-        state,
-        country,
-        postalCode,
-        latitude,
-        longitude,
-      };
-      user.shippingAddresses.push(newAddress);
-    }
+    // Always replace the shippingAddresses array with the new address as the single active address
+    const newAddress = {
+      name,
+      phone,
+      addressDescription,
+      address: addressLine1,
+      landmark,
+      city,
+      state,
+      country,
+      postalCode,
+      latitude,
+      longitude,
+      isActive: true, // Always active since it's the only one
+    };
+    
+    // Replace the entire array
+    user.shippingAddresses = [newAddress];
 
     // Set availableLocalities to the postalCode of the active address
     const activeAddress = user.shippingAddresses.find((addr) => addr.isActive);

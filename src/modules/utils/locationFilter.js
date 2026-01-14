@@ -33,20 +33,27 @@ const createLocationFilter = async (req) => {
     return null;
   }
 
-  // 4. Get postal code from active address
-  const { postalCode } = activeAddress;
+  // 4. Get latitude and longitude from active address
+  const { latitude, longitude } = activeAddress;
 
-  if (!postalCode) {
-    console.log("No postal code found in active active address.");
+  if (!latitude || !longitude) {
+    console.log("No coordinates found in active address.");
     return null;
   }
 
-  // 5. Build the strict location matching logic
-  const matchConditions = [];
+  // 5. Build the strict location matching logic (10km radius)
+  // Earth radius in km = 6378.1
+  const radiusInRadians = 10 / 6378.1;
 
-  // Match postal code against vendor's primary postal code OR their serviceable list
-  matchConditions.push({ "location.address.postalCode": postalCode });
-  matchConditions.push({ "location.address.postalCodes": postalCode });
+  const matchConditions = [
+    {
+      "location.coordinates": {
+        $geoWithin: {
+          $centerSphere: [[longitude, latitude], radiusInRadians],
+        },
+      },
+    },
+  ];
 
   // 6. Return null if no location criteria could be built (Defense in depth)
   if (matchConditions.length === 0) {
@@ -58,10 +65,12 @@ const createLocationFilter = async (req) => {
     isRestricted: false,
   };
 
-  // 7. Return merged filter: Base requirements + Location ($or)
+  // 7. Return merged filter: Base requirements + Location
+  // Note: We use $and here implicitly by merging properties, or we can just return the object.
+  // Previous logic used $or for postal codes. Here we have a single geospatial condition.
   return {
     ...baseFilter,
-    $or: matchConditions,
+    ...matchConditions[0], // Spread the geo query directly
   };
 };
 
