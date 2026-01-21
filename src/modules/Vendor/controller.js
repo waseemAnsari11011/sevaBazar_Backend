@@ -94,13 +94,13 @@ exports.createVendor = async (req, res) => {
     // Build the location object
     const locationData = location
       ? {
-          type: "Point",
-          coordinates: location.coordinates || [], // [lng, lat]
-          address: {
-            ...location.address,
-            postalCodes: location.address.postalCodes || [location.address.postalCode], // Default to primary if empty
-          },
-        }
+        type: "Point",
+        coordinates: location.coordinates || [], // [lng, lat]
+        address: {
+          ...location.address,
+          postalCodes: location.address.postalCodes || [location.address.postalCode], // Default to primary if empty
+        },
+      }
       : undefined;
 
     // Create a new vendor with the hashed password and document URLs
@@ -441,9 +441,6 @@ exports.updateVendor = async (req, res) => {
     }
 
     // Handle password hashing
-    if (req.body.password) {
-      req.body.password = await bcrypt.hash(req.body.password, 10);
-    }
 
     // Apply all updates (except documents which we handled above)
     updates.forEach((update) => {
@@ -1279,9 +1276,7 @@ exports.resetPassword = async (req, res) => {
         .json({ message: "Password reset token is invalid or has expired." });
     }
 
-    // Hash the new password
-    const hashedPassword = await bcrypt.hash(req.body.password, 10);
-    vendor.password = hashedPassword;
+    vendor.password = req.body.password;
     vendor.resetPasswordToken = undefined;
     vendor.resetPasswordExpires = undefined;
 

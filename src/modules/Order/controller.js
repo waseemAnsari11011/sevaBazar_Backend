@@ -1,4 +1,5 @@
-const Order = require('../Order/model');  // Adjust the path according to your project structure
+const Driver = require('../Driver/model');
+const Order = require('../Order/model');
 const { Product } = require('../Product/model');
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
@@ -8,6 +9,7 @@ const Customer = require('../Customer/model')
 const Settings = require('../Settings/model');
 const emailService = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushNotificationUtil');
+const { calculateDistance, calculateDeliveryFee } = require('../Driver/pricingUtil');
 
 //razorpay
 const razorpay = new Razorpay({
@@ -51,37 +53,24 @@ exports.createOrderRazorpay = async (req, res) => {
         }
 
         // Fetch settings for delivery charge configuration
-        const settings = await Settings.findOne();
-        const deliveryChargeConfig = settings?.deliveryChargeConfig || [];
+        let settings = await Settings.findOne();
+        if (!settings) {
+            settings = await Settings.create({ vendorVisibilityRadius: 10 });
+        }
 
         // Calculate delivery charges for each vendor
         for (const vendor of vendors) {
+            if (!mongoose.Types.ObjectId.isValid(vendor.vendor)) {
+                return res.status(400).json({ error: `Invalid Vendor ID: ${vendor.vendor}. Please use the MongoDB _id string instead of email/name.` });
+            }
             const vendorDetails = await Vendor.findById(vendor.vendor);
             if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates && shippingAddress.latitude && shippingAddress.longitude) {
                 const vendorLat = vendorDetails.location.coordinates[1];
                 const vendorLon = vendorDetails.location.coordinates[0];
                 const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
-                
-                let charge = 0;
-                
-                // Find matching rule
-                const match = deliveryChargeConfig.find(tier => {
-                    const type = tier.conditionType || 'range'; // Default to range for backward compatibility
-                    if (type === 'range') {
-                         return distance >= tier.minDistance && distance < tier.maxDistance;
-                    } else if (type === 'greaterThan') {
-                         return distance > tier.minDistance; // stored in minDistance or we can standardize
-                    } else if (type === 'lessThan') {
-                         return distance < tier.maxDistance; // stored in maxDistance
-                    }
-                    return false;
-                });
 
-                if (match) {
-                    charge = match.deliveryFee;
-                }
-                // If no match found, charge remains 0
-                vendor.deliveryCharge = charge;
+                vendor.deliveryCharge = Number(calculateDeliveryFee(distance, settings).toFixed(2));
+                vendor.distance = Number(distance.toFixed(2));
             } else {
                 vendor.deliveryCharge = 0; // Default if coordinates missing
             }
@@ -175,14 +164,14 @@ exports.updatePaymentStatus = async (req, res) => {
             for (const vendor of vendors) {
                 for (const productInfo of vendor.products) {
                     const product = await Product.findById(productInfo.product).populate('variations');
-                    
+
                     if (product) {
                         // Update variations
                         for (const orderedVariation of productInfo.variations) {
                             const productVariation = product.variations.find(
                                 variation => variation._id.toString() === orderedVariation._id
                             );
-                            
+
                             if (productVariation) {
                                 productVariation.quantity -= orderedVariation.quantity;
                                 await productVariation.save();
@@ -283,36 +272,25 @@ exports.createOrder = async (req, res) => {
         }
 
         // Fetch settings for delivery charge configuration
-        const settings = await Settings.findOne();
-        const deliveryChargeConfig = settings?.deliveryChargeConfig || [];
+        let settings = await Settings.findOne();
+        if (!settings) {
+            settings = await Settings.create({ vendorVisibilityRadius: 10 });
+        }
 
         // Calculate delivery charges for each vendor
         for (const vendor of vendors) {
-            const vendorDetails = await Vendor.findById(vendor.vendor);
+            const vId = vendor.vendor;
+            if (!mongoose.Types.ObjectId.isValid(vId)) {
+                return res.status(400).json({ error: `Invalid Vendor ID: ${vId}. Please use the MongoDB _id string.` });
+            }
+            const vendorDetails = await Vendor.findById(vId);
             if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates && shippingAddress.latitude && shippingAddress.longitude) {
                 const vendorLat = vendorDetails.location.coordinates[1];
                 const vendorLon = vendorDetails.location.coordinates[0];
                 const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
-                
-                vendor.distance = distance; // Save the distance
 
-                let charge = 0;
-                const match = deliveryChargeConfig.find(tier => {
-                    const type = tier.conditionType || 'range';
-                    if (type === 'range') {
-                         return distance >= tier.minDistance && distance < tier.maxDistance;
-                    } else if (type === 'greaterThan') {
-                         return distance > tier.minDistance;
-                    } else if (type === 'lessThan') {
-                         return distance < tier.maxDistance;
-                    }
-                    return false;
-                });
-
-                if (match) {
-                    charge = match.deliveryFee;
-                }
-                vendor.deliveryCharge = charge;
+                vendor.distance = Number(distance.toFixed(2)); // Save the distance
+                vendor.deliveryCharge = Number(calculateDeliveryFee(distance, settings).toFixed(2));
             } else {
                 vendor.deliveryCharge = 0;
             }
@@ -345,7 +323,7 @@ exports.createOrder = async (req, res) => {
                         if (productVariation.quantity < 0) {
                             return res.status(400).json({ error: `Insufficient quantity for variation ${orderedVariation._id}` });
                         }
-                        
+
                         // Save the updated variation document
                         await productVariation.save();
 
@@ -365,7 +343,7 @@ exports.createOrder = async (req, res) => {
                 // Update the root-level quantity of the product
                 product.quantity = totalQuantity;
                 productInfo.name = product.name;
-                
+
                 // Save the updated product document
                 await product.save();
             }
@@ -433,7 +411,7 @@ exports.getOrdersByVendor = async (req, res) => {
         }
 
         const pipeline = [
-            { $unwind: "$vendors" }
+            { $unwind: { path: "$vendors", preserveNullAndEmptyArrays: true } }
         ];
 
         // Include the $match stage only if the vendor's role is not 'admin'
@@ -442,6 +420,17 @@ exports.getOrdersByVendor = async (req, res) => {
         }
 
         const vendorOrders = await Order.aggregate([
+            {
+                $addFields: {
+                    customer: {
+                        $cond: {
+                            if: { $eq: [{ $type: "$customer" }, "string"] },
+                            then: { $toObjectId: "$customer" },
+                            else: "$customer"
+                        }
+                    }
+                }
+            },
             ...pipeline,
             {
                 $lookup: {
@@ -452,7 +441,7 @@ exports.getOrdersByVendor = async (req, res) => {
                 }
             },
             // Unwind the customerDetails array to get the object
-            { $unwind: "$customerDetails" },
+            { $unwind: { path: "$customerDetails", preserveNullAndEmptyArrays: true } },
             // Lookup to join vendor details
             {
                 $lookup: {
@@ -463,9 +452,9 @@ exports.getOrdersByVendor = async (req, res) => {
                 }
             },
             // Unwind the vendorDetails array to get the object
-            { $unwind: "$vendorDetails" },
+            { $unwind: { path: "$vendorDetails", preserveNullAndEmptyArrays: true } },
             // Unwind the products array to work with individual product documents
-            { $unwind: "$vendors.products" },
+            { $unwind: { path: "$vendors.products", preserveNullAndEmptyArrays: true } },
             // Lookup to join product details
             {
                 $lookup: {
@@ -476,7 +465,7 @@ exports.getOrdersByVendor = async (req, res) => {
                 }
             },
             // Unwind the productDetails array to get the object
-            { $unwind: "$productDetails" },
+            { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
             // Group back the products and vendors
             {
                 $group: {
@@ -493,15 +482,12 @@ exports.getOrdersByVendor = async (req, res) => {
                         createdAt: "$createdAt",
                         is_new: "$is_new"
                     },
+                    totalAmount: { $sum: "$vendors.products.totalAmount" },
                     products: {
                         $push: {
                             product: "$productDetails",
                             quantity: "$vendors.products.quantity",
-                            price: "$vendors.products.price",
-                            discount: "$vendors.products.discount",
-                            orderedVariations: "$vendors.products.variations",
-                            _id: "$vendors.products._id",
-                            totalAmount: "$vendors.products.totalAmount"
+                            price: "$vendors.products.price"
                         }
                     }
                 }
@@ -519,6 +505,7 @@ exports.getOrdersByVendor = async (req, res) => {
                     razorpay_payment_id: "$_id.razorpay_payment_id",
                     createdAt: "$_id.createdAt",
                     is_new: "$_id.is_new",
+                    totalAmount: 1,
                     vendors: {
                         vendor: "$_id.vendor",
                         orderStatus: "$_id.orderStatus",
@@ -660,12 +647,28 @@ exports.getRecentOrdersByVendor = async (req, res) => {
 
 exports.updateOrderStatus = async (req, res) => {
     const { orderId, vendorId } = req.params;
-    const { newStatus } = req.body;
+    const { newStatus, pickupOtp: enteredOtp } = req.body;
 
     try {
-        // Find the order by ID and update the status for the specific vendor
+        // Find the order first to check for OTP if needed
+        const existingOrder = await Order.findOne({ orderId: orderId });
+        if (!existingOrder) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // If shifting to 'Shipped', verify OTP if a driver is assigned
+        if (newStatus === 'Shipped' && existingOrder.driverId) {
+            if (!enteredOtp) {
+                return res.status(400).json({ error: 'Pickup OTP is required for handover' });
+            }
+            if (Number(enteredOtp) !== existingOrder.pickupOtp) {
+                return res.status(400).json({ error: 'Invalid Pickup OTP. Please check with the driver.' });
+            }
+        }
+
+        // Find the order by custom orderId (6-digit) and update the status for the specific vendor
         const order = await Order.findOneAndUpdate(
-            { _id: new mongoose.Types.ObjectId(orderId), 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) },
+            { orderId: orderId, 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) },
             { $set: { 'vendors.$.orderStatus': newStatus } },
             { new: true }
         ).populate('customer'); // Ensure customer details are populated
@@ -674,19 +677,65 @@ exports.updateOrderStatus = async (req, res) => {
             return res.status(404).json({ error: 'Order or vendor not found' });
         }
 
+        // ===== NEW: Notify drivers when vendor accepts order (status → Processing) =====
+        if (newStatus === 'Processing' && !order.driverId) {
+            try {
+                const { findNearestDrivers } = require('../Driver/controller');
+                const driverIds = await findNearestDrivers(vendorId);
+
+                if (driverIds.length > 0) {
+                    const io = req.app.get('io');
+
+                    // Get vendor location for pickup
+                    const Vendor = require('../Vendor/model');
+                    const vendor = await Vendor.findById(vendorId);
+
+                    if (vendor && vendor.location) {
+                        const offerData = {
+                            orderId: order.orderId,
+                            pickupLocation: {
+                                latitude: vendor.location.coordinates[1],
+                                longitude: vendor.location.coordinates[0]
+                            },
+                            dropLocation: {
+                                latitude: order.shippingAddress.latitude,
+                                longitude: order.shippingAddress.longitude
+                            },
+                            // Include full shipping details for delivery screen
+                            shippingAddress: order.shippingAddress,
+                            customerName: order.shippingAddress?.name || order.name,
+                            customerPhone: order.shippingAddress?.phone
+                        };
+
+                        // Emit to all nearby drivers
+                        driverIds.forEach(driverId => {
+                            io.to(driverId.toString()).emit('new_order_offer', offerData);
+                            console.log(`Emitted order offer to driver: ${driverId}`);
+                        });
+
+                        console.log(`Order ${order.orderId} offered to ${driverIds.length} drivers`);
+                    }
+                }
+            } catch (driverError) {
+                console.error('Error notifying drivers:', driverError);
+                // Don't fail the status update if driver notification fails
+            }
+        }
+        // ===== END: Driver notification =====
+
         // If the new status is 'Shipped', set arrivalAt to 15 minutes from now
         if (newStatus === 'Shipped') {
             const deliveryTime = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
-            
+
             order.vendors.forEach(vendor => {
-                if (vendor.vendor.equals(vendorId)) {
+                if (vendor.vendor.toString() === vendorId.toString()) {
                     vendor.products.forEach(product => {
                         product.arrivalAt = deliveryTime;
                     });
                 }
             });
-             // Save the updated arrival times
-             await order.save();
+            // Save the updated arrival times
+            await order.save();
         }
 
         // If the new status is 'Delivered', calculate and update deliveredInMin at the vendor level
@@ -698,7 +747,7 @@ exports.updateOrderStatus = async (req, res) => {
 
             // Update the deliveredInMin field for the specific vendor
             order.vendors.forEach(vendor => {
-                if (vendor.vendor.equals(vendorId)) {
+                if (vendor.vendor.toString() === vendorId.toString()) {
                     vendor.deliveredInMin = deliveredInMin;
                 }
             });
@@ -707,25 +756,25 @@ exports.updateOrderStatus = async (req, res) => {
             await order.save();
         }
 
-        // Extract customer ID from the order
-        const customerId = order.customer._id;
+        // Extract customer ID from the order - SAFETY CHECK
+        if (order.customer && order.customer._id) {
+            const customerId = order.customer._id;
 
-        // Retrieve the customer from database to get FCM token
-        const customer = await Customer.findById(customerId);
-        if (!customer) {
-            return res.status(404).json({ error: 'Customer not found' });
-        }
+            // Retrieve the customer from database to get FCM token
+            const customer = await Customer.findById(customerId);
+            if (customer && customer.fcmDeviceToken) {
+                const fcmtoken = customer.fcmDeviceToken;
 
-        const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
-
-        const title = 'Order Status Updated';
-        const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
-        try {
-            // Assuming you have a function or service to send push notifications
-            let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
-            console.log("Push notification response:", pushNotificationRes);
-        } catch (error) {
-            console.error('Error sending push notification:', error);
+                const title = 'Order Status Updated';
+                const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
+                try {
+                    // Assuming you have a function or service to send push notifications
+                    let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+                    console.log("Push notification response:", pushNotificationRes);
+                } catch (error) {
+                    console.error('Error sending push notification:', error);
+                }
+            }
         }
 
         res.json(order);
@@ -734,10 +783,6 @@ exports.updateOrderStatus = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
-
-
-
-
 
 
 
@@ -898,11 +943,11 @@ exports.getUnacceptedOrders = async (req, res) => {
         const unacceptedOrders = await Order.find({
             acceptedBy: { $exists: false }
         })
-        .select('orderId customer vendors shippingAddress createdAt')
-        .populate({
-            path: 'customer', 
-            select: 'name contactNumber image' // Select relevant customer details to return
-        });
+            .select('orderId customer vendors shippingAddress createdAt')
+            .populate({
+                path: 'customer',
+                select: 'name contactNumber image' // Select relevant customer details to return
+            });
 
         // Send the found orders as a response
         res.status(200).json({
@@ -918,120 +963,108 @@ exports.getUnacceptedOrders = async (req, res) => {
     }
 };
 
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; // Radius of the earth in km
-    const dLat = deg2rad(lat2 - lat1);
-    const dLon = deg2rad(lon2 - lon1);
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const d = R * c; // Distance in km
-    return d;
-}
-
-function deg2rad(deg) {
-    return deg * (Math.PI / 180);
-}
-
-exports.calculateDeliveryCharge = async (req, res) => {
-    try {
-        const { vendors, shippingAddress, customerLat, customerLng } = req.body;
-
-        if (!vendors || !shippingAddress) {
-             // If lat/lng passed directly (e.g. form temporary state), use them. 
-             // Otherwise expect shippingAddress to have them.
-        }
-
-        const lat = shippingAddress?.latitude || customerLat;
-        const lng = shippingAddress?.longitude || customerLng;
-
-        if (!lat || !lng) {
-            return res.status(400).json({ error: 'Customer location (latitude/longitude) is required.' });
-        }
-
-        // Fetch settings
-        const settings = await Settings.findOne();
-        const deliveryChargeConfig = settings?.deliveryChargeConfig || [];
-
-        let totalDeliveryCharge = 0;
-        const charges = [];
-
-        for (const vendorId of vendors) {
-             // In checkout, vendors might be passed as an array of IDs or objects.
-             // Usually checkout passes cart items which are grouped by vendor? 
-             // Or let's assume input is array of vendor IDs. 
-             // Actually Checkout usually has full cart structure.
-             // Let's assume input `vendors` is an array of vendor IDs.
-             const vId = typeof vendorId === 'string' ? vendorId : vendorId.vendor;
-             const vendorDetails = await Vendor.findById(vId);
-
-             if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates) {
-                 const vendorLat = vendorDetails.location.coordinates[1];
-                 const vendorLon = vendorDetails.location.coordinates[0];
-                 const distance = calculateDistance(vendorLat, vendorLon, lat, lng);
-
-                 let charge = 0;
-                const match = deliveryChargeConfig.find(tier => {
-                    const type = tier.conditionType || 'range';
-                    if (type === 'range') {
-                         return distance >= tier.minDistance && distance < tier.maxDistance;
-                    } else if (type === 'greaterThan') {
-                         return distance > tier.minDistance;
-                    } else if (type === 'lessThan') {
-                         return distance < tier.maxDistance;
-                    }
-                    return false;
-                });
-                
-                if (match) {
-                    charge = match.deliveryFee;
-                }
-                
-                totalDeliveryCharge += charge;
-                charges.push({ vendor: vendorId, distance, charge });
-             }
-        }
-
-        res.status(200).json({ success: true, totalDeliveryCharge, charges });
-
-    } catch (error) {
-        console.error('Error calculating delivery charge:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
-};
 
 
 
 exports.acceptOrder = async (req, res) => {
     try {
-        const { orderId } = req.body; // Get the order ID from the request body
+        const { orderId, currentLocation } = req.body; // Get orderId and driver's current location
         const { deliveryManId } = req.params; // Assuming deliveryManId is passed as a URL parameter
 
-        console.log("orderId==>>", orderId)
+        console.log("orderId==>", orderId);
 
-        // Find the order by ID and update the acceptedBy field
-        const updatedOrder = await Order.findOneAndUpdate(
-            { orderId: orderId }, // Match order by orderId
-            { acceptedBy: deliveryManId, is_new: false }, // Update acceptedBy and is_new fields
-            { new: true } // Return the updated order
-        ).populate('customer', 'name contactNumber'); // Optionally populate customer details
+        // Find the order first to get vendor and customer locations
+        const order = await Order.findOne({ orderId: orderId })
+            .populate('customer', 'name contactNumber')
+            .populate('vendors.vendor', 'location');
 
-        if (!updatedOrder) {
+        if (!order) {
             return res.status(404).json({
                 success: false,
                 message: 'Order not found'
             });
         }
 
+        // Calculate driver delivery fee if current location is provided
+        let driverDeliveryFee = null;
+
+        if (currentLocation && currentLocation.latitude && currentLocation.longitude) {
+            // Fetch settings for driver delivery fee configuration
+            const Settings = require('../Settings/model');
+            let settings = await Settings.findOne();
+
+            if (!settings) {
+                settings = await Settings.create({ vendorVisibilityRadius: 10 });
+            }
+
+            // Get pickup location (first vendor's location)
+            const firstVendor = order.vendors[0]?.vendor;
+            if (firstVendor && firstVendor.location && firstVendor.location.coordinates) {
+                const pickupGeo = {
+                    latitude: firstVendor.location.coordinates[1],
+                    longitude: firstVendor.location.coordinates[0]
+                };
+
+                // Get drop location (customer's shipping address)
+                const dropGeo = {
+                    latitude: order.shippingAddress.latitude,
+                    longitude: order.shippingAddress.longitude
+                };
+
+                // Calculate driver delivery fee
+                const { calculateDriverDeliveryFee } = require('../Driver/pricingUtil');
+                driverDeliveryFee = calculateDriverDeliveryFee(
+                    currentLocation,
+                    pickupGeo,
+                    dropGeo,
+                    settings
+                );
+                driverDeliveryFee.calculatedAt = new Date();
+            }
+        }
+
+        // Generate 4-digit Pickup OTP
+        const pickupOtp = Math.floor(1000 + Math.random() * 9000);
+
+        // Update the order with acceptedBy and driver delivery fee
+        // ATOMIC CHECK: Only update if no driver assigned yet (prevents race condition)
+        const updatedOrder = await Order.findOneAndUpdate(
+            {
+                orderId: orderId,
+                driverId: null // Only update if no driver assigned
+            },
+            {
+                acceptedBy: deliveryManId,
+                driverId: deliveryManId,
+                pickupOtp: pickupOtp,
+                is_new: false,
+                ...(driverDeliveryFee && { driverDeliveryFee })
+            },
+            { new: true }
+        ).populate('customer', 'name contactNumber');
+
+        // If order is null, it means another driver already accepted
+        if (!updatedOrder) {
+            return res.status(409).json({
+                success: false,
+                message: 'Order already accepted by another driver'
+            });
+        }
+
+        // Link Order to Driver
+        await Driver.findByIdAndUpdate(deliveryManId, {
+            currentOrderId: updatedOrder._id
+        });
+
         // Send back the updated order details
         res.status(200).json({
             success: true,
             message: 'Order accepted successfully',
-            order: updatedOrder
+            order: updatedOrder,
+            driverDeliveryFee
         });
     } catch (error) {
+        console.error('Accept Order Error:', error);
         res.status(500).json({
             success: false,
             message: 'Server Error',
@@ -1042,3 +1075,117 @@ exports.acceptOrder = async (req, res) => {
 
 
 
+// Unified delivery charge calculation endpoint
+// Supports both old format (vendors + shippingAddress) and new format (3 locations)
+
+exports.getOrderDetailsByVendor = async (req, res) => {
+    try {
+        const { orderId, vendorId } = req.params;
+        const oId = new mongoose.Types.ObjectId(orderId);
+        const vId = new mongoose.Types.ObjectId(vendorId);
+
+        const order = await Order.aggregate([
+            { $match: { _id: oId } },
+            {
+                $addFields: {
+                    customer: {
+                        $cond: {
+                            if: { $eq: [{ $type: "$customer" }, "string"] },
+                            then: { $toObjectId: "$customer" },
+                            else: "$customer"
+                        }
+                    }
+                }
+            },
+            { $unwind: { path: "$vendors", preserveNullAndEmptyArrays: true } },
+            { $match: { "vendors.vendor": vId } },
+            {
+                $lookup: {
+                    from: "customers",
+                    localField: "customer",
+                    foreignField: "_id",
+                    as: "customer"
+                }
+            },
+            { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+            { $unwind: { path: "$vendors.products", preserveNullAndEmptyArrays: true } },
+            {
+                $lookup: {
+                    from: "products",
+                    localField: "vendors.products.product",
+                    foreignField: "_id",
+                    as: "productDetails"
+                }
+            },
+            { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
+            {
+                $group: {
+                    _id: "$_id",
+                    orderId: { $first: "$orderId" },
+                    orderStatus: { $first: "$vendors.orderStatus" },
+                    createdAt: { $first: "$createdAt" },
+                    totalAmount: { $sum: "$vendors.products.totalAmount" },
+                    customer: { $first: "$customer" },
+                    customerNameFallback: { $first: "$name" },
+                    pickupOtp: { $first: "$pickupOtp" },
+                    driverId: { $first: "$driverId" },
+                    shippingAddress: { $first: "$shippingAddress" },
+                    items: {
+                        $push: {
+                            name: { $ifNull: ["$productDetails.name", "$vendors.products.name"] },
+                            price: "$vendors.products.price",
+                            quantity: "$vendors.products.quantity"
+                        }
+                    }
+                }
+            }
+        ]);
+
+        if (!order || order.length === 0) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        res.status(200).json({ success: true, data: order[0] });
+    } catch (error) {
+        console.error("Error fetching order details:", error);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+
+exports.seedTestOrder = async (req, res) => {
+    try {
+        const vendorId = new mongoose.Types.ObjectId('69688356e816bb4201baedc6');
+
+        // Create dummy customer details if needed
+        const newOrder = new Order({
+            orderId: Math.floor(100000 + Math.random() * 900000).toString(),
+            customer: new mongoose.Types.ObjectId(), // Dummy ID
+            vendors: [{
+                vendor: vendorId,
+                orderStatus: "Pending",
+                products: [{
+                    product: new mongoose.Types.ObjectId(),
+                    name: "SevaBazar Special Burger",
+                    quantity: 2,
+                    price: 250,
+                    totalAmount: 500
+                }]
+            }],
+            totalAmount: 500,
+            shippingAddress: {
+                addressLine1: "45/A Test Building",
+                city: "Muzaffarpur",
+                state: "Bihar",
+                postalCode: "842001"
+            },
+            paymentStatus: "Unpaid"
+        });
+
+        await newOrder.save();
+        res.status(201).json({ success: true, message: "Test order seeded successfully!", orderId: newOrder.orderId });
+    } catch (error) {
+        console.error("Seed error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};

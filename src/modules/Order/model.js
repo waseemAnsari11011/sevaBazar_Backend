@@ -113,9 +113,29 @@ const orderSchema = new Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Delivery",
   },
+  driverId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Driver",
+  },
+  pickupOtp: {
+    type: Number,
+  },
+  deliveryOtp: {
+    type: Number,
+  },
   is_new: {
     type: Boolean,
     default: true,
+  },
+  driverDeliveryFee: {
+    totalDistance: Number,
+    currentToPickup: Number,
+    pickupToDrop: Number,
+    basePay: Number,
+    extraDistance: Number,
+    extraPay: Number,
+    totalFee: Number,
+    calculatedAt: Date,
   },
 });
 

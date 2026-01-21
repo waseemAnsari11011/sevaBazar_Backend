@@ -7,9 +7,10 @@ router.post('/order', orderController.createOrder);
 router.post('/razorpay', orderController.createOrderRazorpay);
 router.post('/razorpay-verify-payment', orderController.updatePaymentStatus);
 router.post('/manually-verify-payment', orderController.updatePaymentStatusManually);
-router.post('/calculate-delivery', orderController.calculateDeliveryCharge);
 
+router.post('/seed-test-order', orderController.seedTestOrder);
 router.get('/order/vendor/:vendorId', orderController.getOrdersByVendor);
+router.get('/order/:orderId/vendor/:vendorId', orderController.getOrderDetailsByVendor);
 router.get('/new-order/vendor/:vendorId', orderController.getNewOrdersCountByVendor);
 router.get('/order/recent-order/:vendorId', orderController.getRecentOrdersByVendor);
 

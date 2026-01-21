@@ -22,6 +22,8 @@ const deliveryRoutes = require("./src/modules/Delivery/route");
 const settingsRoutes = require("./src/modules/Settings/route");
 const VendorProductCategoryRoutes = require("./src/modules/VendorProductCategory/route");
 const TicketRoutes = require("./src/modules/Ticket/route");
+const driverRoutes = require("./src/modules/Driver/route");
+
 
 // Initializing express application
 const app = express();
@@ -52,7 +54,9 @@ mongoose
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
-  .then(() => console.log("Connected to MongoDB"))
+  .then(() => {
+    console.log("Connected to MongoDB:", mongoUri.replace(process.env.MONGO_PASSWORD, '****'));
+  })
   .catch((err) => console.error("Could not connect to MongoDB", err));
 
 // Routes
@@ -83,6 +87,8 @@ app.use(deliveryRoutes);
 app.use("/settings", settingsRoutes);
 app.use("/tickets", TicketRoutes);
 app.use(VendorProductCategoryRoutes);
+app.use(driverRoutes);
+
 
 console.log("Ticket Routes Registered");
 
@@ -90,19 +96,43 @@ console.log("Ticket Routes Registered");
 app.get("*", (req, res) => {
   console.log("404 Hit: ", req.originalUrl); // Log the URL that caused the fall-through
   const indexPath = path.join(__dirname, "..", "sevabazar_panel", "build", "index.html");
-  
+
   const fs = require('fs'); // Ensure fs is available
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).json({ 
-      error: "Not Found", 
+    res.status(404).json({
+      error: "Not Found",
       message: "The requested resource was not found.",
-      path: req.originalUrl 
+      path: req.originalUrl
     });
   }
 });
 
-app.listen(port, () => {
+const server = require("http").createServer(app);
+const io = require("socket.io")(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  }
+});
+
+// Attach io to app so it can be accessed in controllers
+app.set("io", io);
+
+io.on("connection", (socket) => {
+  console.log("A user connected:", socket.id);
+
+  socket.on("join", (userId) => {
+    socket.join(userId);
+    console.log(`User ${userId} joined their private room`);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected");
+  });
+});
+
+server.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });

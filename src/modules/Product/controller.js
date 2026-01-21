@@ -118,7 +118,7 @@ exports.addProduct = async (req, res) => {
         .json({ message: "At least one variation is required" });
     }
     const variationsToCreate = variationsData.map((variation, index) => {
-        const images = allVariationImages
+      const images = allVariationImages
         .filter((file) => file.fieldname.startsWith(`variationImage_${index}`))
         .map((file) => file.location);
       const videos = allVariationImages
@@ -139,7 +139,7 @@ exports.addProduct = async (req, res) => {
       { session }
     );
     newProduct.variations = savedVariations.map((v) => v._id);
-    
+
     // Calculate total quantity
     const totalQuantity = savedVariations.reduce((sum, v) => sum + (v.quantity || 0), 0);
     newProduct.quantity = totalQuantity;
@@ -274,10 +274,10 @@ exports.addVariation = async (req, res) => {
     const savedVariation = await newVariation.save({ session });
 
     product.variations.push(savedVariation._id);
-    
+
     // Update product quantity
     product.quantity = (product.quantity || 0) + (savedVariation.quantity || 0);
-    
+
     await product.save({ session });
 
     await session.commitTransaction();
@@ -353,10 +353,9 @@ exports.updateVariation = async (req, res) => {
     }
 
     // Update fields
-    variation.price = price;
-    variation.discount = discount;
-    variation.quantity = quantity;
-    variation.quantity = quantity;
+    variation.price = parseFloat(price) || 0;
+    variation.discount = (discount === 'null' || discount === null) ? 0 : (parseFloat(discount) || 0);
+    variation.quantity = (quantity === 'null' || quantity === null) ? 0 : (parseInt(quantity) || 0);
     variation.images = [...existingImages, ...newImages];
     variation.videos = [...existingVideos, ...newVideos];
 
@@ -437,16 +436,16 @@ exports.deleteVariation = async (req, res) => {
     // Update product quantity
     const product = await Product.findById(productId).session(session).populate('variations');
     if (product) {
-       // Filter out the deleted variation from the in-memory array if populate included it (though pull should handle it, safer to recalc)
-       // Since we pulled it, we need to fetch fresh or just subtract. 
-       // Better to fetch fresh after pull, but we are in transaction.
-       // Actually, since we pulled from DB, let's just subtract the deleted variation quantity.
-       // But we need the current product quantity.
-       // Let's just re-calculate from remaining variations.
-       const remainingVariations = await ProductVariation.find({ product: productId }).session(session);
-       const totalQuantity = remainingVariations.reduce((sum, v) => sum + (v.quantity || 0), 0);
-       product.quantity = totalQuantity;
-       await product.save({ session });
+      // Filter out the deleted variation from the in-memory array if populate included it (though pull should handle it, safer to recalc)
+      // Since we pulled it, we need to fetch fresh or just subtract. 
+      // Better to fetch fresh after pull, but we are in transaction.
+      // Actually, since we pulled from DB, let's just subtract the deleted variation quantity.
+      // But we need the current product quantity.
+      // Let's just re-calculate from remaining variations.
+      const remainingVariations = await ProductVariation.find({ product: productId }).session(session);
+      const totalQuantity = remainingVariations.reduce((sum, v) => sum + (v.quantity || 0), 0);
+      product.quantity = totalQuantity;
+      await product.save({ session });
     }
 
     // Delete Variation
@@ -702,11 +701,11 @@ exports.getRecentlyAddedProducts = async (req, res) => {
     // Construct the filter for availableLocalities
     const locationFilter = userLocation
       ? {
-          availableLocalities: { $in: [userLocation, "all"] },
-          quantity: { $gt: 0 },
-          isVisible: true,
-          isDeleted: { $ne: true },
-        }
+        availableLocalities: { $in: [userLocation, "all"] },
+        quantity: { $gt: 0 },
+        isVisible: true,
+        isDeleted: { $ne: true },
+      }
       : { quantity: { $gt: 0 }, isVisible: true, isDeleted: { $ne: true } };
 
     // Find the most recently added products with the location filter
@@ -741,11 +740,11 @@ exports.getDiscountedProducts = async (req, res) => {
     // Construct the filter for availableLocalities
     const locationFilter = userLocation
       ? {
-          availableLocalities: { $in: [userLocation, "all"] },
-          quantity: { $gt: 0 },
-          isVisible: true,
-          isDeleted: { $ne: true },
-        }
+        availableLocalities: { $in: [userLocation, "all"] },
+        quantity: { $gt: 0 },
+        isVisible: true,
+        isDeleted: { $ne: true },
+      }
       : { quantity: { $gt: 0 }, isVisible: true, isDeleted: { $ne: true } };
 
     // Combine the discount filter with the location filter
@@ -1149,7 +1148,7 @@ exports.updateProductQuantities = async (req, res) => {
       if (product.variations && product.variations.length > 0) {
         totalQuantity = product.variations.reduce((sum, v) => sum + (v.quantity || 0), 0);
       }
-      
+
       product.quantity = totalQuantity;
       await product.save();
       updatedCount++;

@@ -58,51 +58,43 @@ exports.getSettings = async (req, res) => {
  *        vendorVisibilityRadius:
  *          type: number
  *          description: The new visibility radius in kilometers.
- *        deliveryChargeConfig:
- *          type: array
- *          items:
- *            type: object
- *            properties:
- *              minDistance:
- *                type: number
- *              maxDistance:
- *                type: number
- *              deliveryFee:
- *                type: number
- *          description: Configuration for delivery charges based on distance.
+ *        driverSearchRadius:
+ *          type: number
+ *          description: Radius to search for available drivers.
+ *        driverDeliveryFee:
+ *          type: object
+ *          properties:
+ *            basePay:
+ *              type: number
+ *            baseDistance:
+ *              type: number
+ *            perKmRate:
+ *              type: number
+ *          description: Configuration for delivery charges and driver payment.
  * responses:
  * 200:
  * description: Settings updated successfully.
- * content:
- * application/json:
- * schema:
- * $ref: '#/components/schemas/Settings'
  * 400:
- * description: Bad request, vendorVisibilityRadius is required.
+ * description: Bad request.
  * 403:
- * description: Forbidden, user is not a superadmin.
- * 500:
- * description: Internal server error.
+ * description: Forbidden.
  */
 exports.updateSettings = async (req, res) => {
   try {
-    const { vendorVisibilityRadius } = req.body;
-
-    // Check if at least one field is provided
-    if (vendorVisibilityRadius === undefined && !req.body.deliveryChargeConfig) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one field (vendorVisibilityRadius or deliveryChargeConfig) is required.",
-      });
-    }
+    const { vendorVisibilityRadius, driverSearchRadius, driverDeliveryFee } = req.body;
 
     const updateData = {};
     if (vendorVisibilityRadius !== undefined) updateData.vendorVisibilityRadius = vendorVisibilityRadius;
-    if (req.body.deliveryChargeConfig !== undefined) updateData.deliveryChargeConfig = req.body.deliveryChargeConfig;
+    if (driverSearchRadius !== undefined) updateData.driverSearchRadius = driverSearchRadius;
+    if (driverDeliveryFee !== undefined) updateData.driverDeliveryFee = driverDeliveryFee;
 
-    // Find the settings document and update it.
-    // { new: true } returns the modified document.
-    // { upsert: true } creates the document if it doesn't exist.
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No fields provided for update.",
+      });
+    }
+
     const updatedSettings = await Settings.findOneAndUpdate(
       {},
       updateData,
