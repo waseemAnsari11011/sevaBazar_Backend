@@ -46,6 +46,7 @@ exports.createDriver = async (req, res) => {
 };
 
 exports.driverLogin = async (req, res) => {
+    console.log("Driver login request:");
     try {
         const { phone, password } = req.body;
 
