@@ -651,7 +651,12 @@ exports.updateOrderStatus = async (req, res) => {
 
     try {
         // Find the order first to check for OTP if needed
-        const existingOrder = await Order.findOne({ orderId: orderId });
+        // Flexibly handle both MongoDB _id and custom 6-digit orderId
+        const query = mongoose.Types.ObjectId.isValid(orderId)
+            ? { _id: orderId }
+            : { orderId: orderId };
+
+        const existingOrder = await Order.findOne(query);
         if (!existingOrder) {
             return res.status(404).json({ error: 'Order not found' });
         }
@@ -666,9 +671,13 @@ exports.updateOrderStatus = async (req, res) => {
             }
         }
 
-        // Find the order by custom orderId (6-digit) and update the status for the specific vendor
+        // Find the order by custom orderId (6-digit) or _id and update the status for the specific vendor
+        const updateQuery = mongoose.Types.ObjectId.isValid(orderId)
+            ? { _id: orderId, 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) }
+            : { orderId: orderId, 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) };
+
         const order = await Order.findOneAndUpdate(
-            { orderId: orderId, 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) },
+            updateQuery,
             { $set: { 'vendors.$.orderStatus': newStatus } },
             { new: true }
         ).populate('customer'); // Ensure customer details are populated
@@ -974,7 +983,12 @@ exports.acceptOrder = async (req, res) => {
         console.log("orderId==>", orderId);
 
         // Find the order first to get vendor and customer locations
-        const order = await Order.findOne({ orderId: orderId })
+        // Flexibly handle both MongoDB _id and custom 6-digit orderId
+        const query = mongoose.Types.ObjectId.isValid(orderId)
+            ? { _id: orderId }
+            : { orderId: orderId };
+
+        const order = await Order.findOne(query)
             .populate('customer', 'name contactNumber')
             .populate('vendors.vendor', 'location');
 
@@ -1028,11 +1042,12 @@ exports.acceptOrder = async (req, res) => {
 
         // Update the order with acceptedBy and driver delivery fee
         // ATOMIC CHECK: Only update if no driver assigned yet (prevents race condition)
+        const updateQuery = mongoose.Types.ObjectId.isValid(orderId)
+            ? { _id: orderId, driverId: null }
+            : { orderId: orderId, driverId: null };
+
         const updatedOrder = await Order.findOneAndUpdate(
-            {
-                orderId: orderId,
-                driverId: null // Only update if no driver assigned
-            },
+            updateQuery,
             {
                 acceptedBy: deliveryManId,
                 driverId: deliveryManId,
