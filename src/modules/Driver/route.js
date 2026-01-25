@@ -31,8 +31,8 @@ router.post("/driver/login", driverController.driverLogin);
 router.patch("/driver/:id/status", authenticateToken, authorizeAdmin, driverController.updateDriverStatus);
 
 // Driver routes for real-time tracking
-router.patch("/status", authenticateToken, driverController.updateOnlineStatus);
-router.patch("/location", authenticateToken, driverController.updateLocation);
+router.patch("/driver/status", authenticateToken, driverController.updateOnlineStatus);
+router.patch("/driver/location", authenticateToken, driverController.updateLocation);
 
 // Test route for finding nearest available drivers (Public for simulation/testing)
 router.post("/drivers/nearest", driverController.findNearestDrivers);

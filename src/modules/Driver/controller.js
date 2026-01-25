@@ -69,6 +69,9 @@ exports.driverLogin = async (req, res) => {
             { expiresIn: "7d" }
         );
 
+        // Set driver online status to true upon successful login
+        await Driver.findByIdAndUpdate(driver._id, { isOnline: true });
+
         res.status(200).json({
             message: "Login successful",
             token,
@@ -77,6 +80,7 @@ exports.driverLogin = async (req, res) => {
                 name: driver.personalDetails.name,
                 phone: driver.personalDetails.phone,
                 role: driver.role,
+                isOnline: true, // Echo back the status
             },
         });
     } catch (error) {
@@ -150,7 +154,7 @@ exports.updateOnlineStatus = async (req, res) => {
 
 exports.updateLocation = async (req, res) => {
     try {
-        const { latitude, longitude } = req.body;
+        const { latitude, longitude, address } = req.body;
         const driverId = req.user.id;
 
         if (latitude === undefined || longitude === undefined) {
@@ -163,6 +167,7 @@ exports.updateLocation = async (req, res) => {
                 currentLocation: {
                     type: "Point",
                     coordinates: [longitude, latitude],
+                    address: address || "",
                 },
             },
             { new: true }
@@ -184,33 +189,59 @@ exports.updateLocation = async (req, res) => {
 
 exports.findNearestDrivers = async (req, res) => {
     try {
-        const { vendorLocation, radius } = req.body;
+        let isInternal = false;
+        let vendorId, searchLat, searchLon, searchRadius, orderId;
 
-        const searchLat = vendorLocation?.latitude || req.body.latitude;
-        const searchLon = vendorLocation?.longitude || req.body.longitude;
+        // Context Detection: If 'res' is not a response object, it's an internal call handled by passing (vendorId)
+        if (!res || typeof res.status !== 'function') {
+            isInternal = true;
+            vendorId = req; // In internal calls, the first argument is vendorId
+        } else {
+            // API Call from Mobile App
+            const { vendorLocation, radius, orderId: oid } = req.body;
+            searchLat = vendorLocation?.latitude || req.body.latitude;
+            searchLon = vendorLocation?.longitude || req.body.longitude;
+            searchRadius = radius;
+            orderId = oid;
+            vendorId = req.body.vendorId;
+        }
+
+        // Logic to resolve vendor coordinates if missing (for internal calls or missing coordinates in API)
+        if (vendorId && (searchLat === undefined || searchLon === undefined)) {
+            const Vendor = require('../Vendor/model');
+            const vendor = await Vendor.findById(vendorId);
+            if (vendor && vendor.location?.coordinates) {
+                searchLon = vendor.location.coordinates[0];
+                searchLat = vendor.location.coordinates[1];
+            }
+        }
 
         if (searchLat === undefined || searchLon === undefined) {
+            if (isInternal) return [];
             return res.status(400).json({
                 message: "Vendor location (latitude/longitude) is required."
             });
         }
 
-        // --- SIMULATION MODE CHECK ---
+        // --- SIMULATION MODE CHECK (Only for API calls with parameters) ---
         const testDrivers = [];
-        for (let i = 1; i <= 10; i++) {
-            const locKey = `${i}driverLocation`;
-            if (req.body[locKey]) {
-                testDrivers.push({
-                    name: `Driver ${i}`,
-                    location: req.body[locKey],
-                    isOnline: req.body[`${i}driverOnline`] !== undefined ? req.body[`${i}driverOnline`] : true,
-                    approvalStatus: req.body[`${i}driverStatus`] || 'approved',
-                    isFree: req.body[`${i}driverFree`] !== undefined ? req.body[`${i}driverFree`] : true
-                });
+        if (!isInternal && req && req.body) {
+            for (let i = 1; i <= 10; i++) {
+                const locKey = `${i}driverLocation`;
+                if (req.body[locKey]) {
+                    testDrivers.push({
+                        name: `Driver ${i}`,
+                        location: req.body[locKey],
+                        isOnline: req.body[`${i}driverOnline`] !== undefined ? req.body[`${i}driverOnline`] : true,
+                        approvalStatus: req.body[`${i}driverStatus`] || 'approved',
+                        isFree: req.body[`${i}driverFree`] !== undefined ? req.body[`${i}driverFree`] : true
+                    });
+                }
             }
         }
 
         const { calculateDistance } = require("./pricingUtil");
+        const Settings = require("../Settings/model");
         let settings = await Settings.findOne();
         if (!settings) {
             settings = await Settings.create({ vendorVisibilityRadius: 10, driverSearchRadius: 5 });
@@ -218,40 +249,38 @@ exports.findNearestDrivers = async (req, res) => {
 
         if (testDrivers.length > 0) {
             // Processing Simulation Drivers
-            const searchRadius = radius || settings.driverSearchRadius || 5;
+            const finalRadius = searchRadius || settings.driverSearchRadius || 5;
             const allValidResults = testDrivers.map(d => {
                 const distance = calculateDistance(searchLat, searchLon, d.location.latitude, d.location.longitude);
-
-                // Quality Test Check (Must be Online, Approved, and Free)
                 const passesQualityTest = d.isOnline === true && d.approvalStatus === 'approved' && d.isFree === true;
-
                 return {
                     ...d,
                     distance: Number(distance.toFixed(2)),
                     passesQualityTest
                 };
             })
-                .filter(d => d.passesQualityTest && d.distance <= searchRadius) // 🎯 Primary Filter: Quality + Radius
-                .sort((a, b) => a.distance - b.distance); // Nearest first
+                .filter(d => d.passesQualityTest && d.distance <= finalRadius)
+                .sort((a, b) => a.distance - b.distance);
 
-            // 🎯 REVERTED: Return ONLY drivers who are at the minimum distance (The Winners)
             let tiedNearestDrivers = [];
             if (allValidResults.length > 0) {
                 const minDistance = allValidResults[0].distance;
                 tiedNearestDrivers = allValidResults.filter(d => d.distance === minDistance);
             }
 
+            if (isInternal) return tiedNearestDrivers.map(d => d._id);
+
             return res.status(200).json({
                 success: true,
                 vendorLocation: { latitude: searchLat, longitude: searchLon },
-                radiusLimit: searchRadius,
+                radiusLimit: finalRadius,
                 count: tiedNearestDrivers.length,
                 results: tiedNearestDrivers.map(({ passesQualityTest, ...rest }) => rest)
             });
         }
 
-        const searchRadius = radius || 10; // Default to 10km as per Block 2.2
-        const radiusInMeters = searchRadius * 1000;
+        const finalRadius = searchRadius || 10;
+        const radiusInMeters = finalRadius * 1000;
 
         const drivers = await Driver.aggregate([
             {
@@ -285,43 +314,70 @@ exports.findNearestDrivers = async (req, res) => {
             }
         }));
 
+        // Resolve DB ObjectId if orderId is a 6-digit code for database persistence
+        let dbOrderId = orderId;
+        if (orderId && !require('mongoose').Types.ObjectId.isValid(orderId)) {
+            const Order = require('../Order/model');
+            const foundOrder = await Order.findOne({ orderId: orderId });
+            if (foundOrder) dbOrderId = foundOrder._id;
+        }
+
         // Trigger Socket Event to found drivers
         if (results.length > 0) {
-            console.log(`Found ${results.length} drivers: ${results.map(d => d.name).join(', ')}`);
-            const io = req.app.get("io");
-            const orderId = req.body.orderId; // Make sure vendor app sends orderId
+            console.log(`[SOCKET] Found ${results.length} drivers: ${results.map(d => d.name).join(', ')}`);
+            const io = (req && req.app) ? req.app.get("io") : null;
+            const OrderAssignment = require('./orderAssignment.model');
 
-            results.forEach(driver => {
-                io.to(driver.id.toString()).emit("new_order_offer", {
-                    orderId,
-                    vendorLocation: { latitude: searchLat, longitude: searchLon },
-                    distance: driver.distance
-                });
+            results.forEach(async (driver) => {
+                const roomId = driver.id.toString();
+
+                // Save assignment to DB for persistence
+                try {
+                    await OrderAssignment.findOneAndUpdate(
+                        { orderId: dbOrderId, driverId: driver.id },
+                        { orderId: dbOrderId, driverId: driver.id, distance: driver.distance, status: 'pending' },
+                        { upsert: true, new: true }
+                    );
+                } catch (err) {
+                    console.error("OrderAssignment save error:", err);
+                }
+
+                if (io) {
+                    io.to(roomId).emit("new_order_offer", {
+                        orderId,
+                        vendorLocation: { latitude: searchLat, longitude: searchLon },
+                        distance: driver.distance
+                    });
+                }
             });
-        } else {
-            console.log("No drivers found matching criteria in 10km radius.");
         }
+
+        if (isInternal) return results.map(d => d.id);
 
         res.status(200).json({
             success: true,
             count: results.length,
-            radiusUsed: searchRadius,
+            radiusUsed: finalRadius,
             drivers: results,
         });
     } catch (error) {
         console.error("Error finding nearest drivers:", error);
+        if (isInternal) return [];
         res.status(500).json({ message: "Internal server error", error: error.message });
     }
 };
 
-// Unified delivery charge calculation endpoint (Relocated from Order module)
-// Supports the new 3-locations format
+const Vendor = require("../Vendor/model");
+
+// Unified delivery charge calculation endpoint
 exports.calculateDriverFee = async (req, res) => {
     try {
         const {
             currentLocation,
             pickupLocation,
             dropLocation,
+            vendors,
+            shippingAddress
         } = req.body;
 
         // Fetch settings
@@ -331,7 +387,56 @@ exports.calculateDriverFee = async (req, res) => {
             settings = await Settings.create({ vendorVisibilityRadius: 10 });
         }
 
-        // NEW FORMAT: 3 locations provided (currentLocation, pickupLocation, dropLocation)
+        const { calculateDistance, calculateDeliveryFee, calculateDriverDeliveryFee } = require("./pricingUtil");
+
+        // NEW FORMAT (from Customer App): vendors array and shippingAddress
+        if (vendors && Array.isArray(vendors) && shippingAddress) {
+            if (!shippingAddress.latitude || !shippingAddress.longitude) {
+                return res.status(400).json({ error: "Shipping address must have latitude and longitude" });
+            }
+
+            const charges = [];
+            let totalDeliveryCharge = 0;
+
+            for (const vendorId of vendors) {
+                const vendor = await Vendor.findById(vendorId);
+                if (!vendor || !vendor.location || !vendor.location.coordinates) {
+                    console.log(`Vendor ${vendorId} not found or has no location`);
+                    continue;
+                }
+
+                console.log(`Calculating for Vendor: ${vendor.name}, Coords: [${vendor.location.coordinates[1]}, ${vendor.location.coordinates[0]}]`);
+                console.log(`Shipping Address Coords: [${shippingAddress.latitude}, ${shippingAddress.longitude}]`);
+
+                const distance = calculateDistance(
+                    vendor.location.coordinates[1], // latitude
+                    vendor.location.coordinates[0], // longitude
+                    shippingAddress.latitude,
+                    shippingAddress.longitude
+                );
+
+                console.log(`Calculated Distance: ${distance.toFixed(2)} km`);
+
+                const charge = calculateDeliveryFee(distance, settings);
+
+                charges.push({
+                    vendorId,
+                    vendorName: vendor.name,
+                    distance: Number(distance.toFixed(2)),
+                    charge: Number(charge.toFixed(2))
+                });
+
+                totalDeliveryCharge += charge;
+            }
+
+            return res.status(200).json({
+                success: true,
+                totalDeliveryCharge: Number(totalDeliveryCharge.toFixed(2)),
+                charges
+            });
+        }
+
+        // DRIVER EARNINGS FORMAT: 3 locations provided (currentLocation, pickupLocation, dropLocation)
         if (currentLocation && pickupLocation && dropLocation) {
             // Validate input
             if (!currentLocation.latitude || !currentLocation.longitude ||
@@ -343,7 +448,6 @@ exports.calculateDriverFee = async (req, res) => {
             }
 
             // Calculate driver delivery fee
-            const { calculateDistance, calculateDeliveryFee, calculateDriverDeliveryFee } = require("./pricingUtil");
             const feeBreakdown = calculateDriverDeliveryFee(
                 currentLocation,
                 pickupLocation,
@@ -364,57 +468,12 @@ exports.calculateDriverFee = async (req, res) => {
 
         // Invalid format provided
         return res.status(400).json({
-            error: "Invalid request format. Provide currentLocation, pickupLocation, and dropLocation"
+            error: "Invalid request format. Provide vendors/shippingAddress or currentLocation/pickupLocation/dropLocation"
         });
 
     } catch (error) {
         console.error("Error calculating delivery fee:", error);
         res.status(500).json({ error: "Internal Server Error", message: error.message });
-    }
-};
-
-exports.findNearestDrivers = async (vendorId) => {
-    try {
-        // Get vendor location
-        const Vendor = require('../Vendor/model');
-        const vendor = await Vendor.findById(vendorId);
-
-        if (!vendor || !vendor.location || !vendor.location.coordinates) {
-            console.log('Vendor not found or location not set');
-            return [];
-        }
-
-        const vendorCoords = vendor.location.coordinates; // [longitude, latitude]
-
-        // Get search radius from settings (default 10km)
-        const settings = await Settings.findOne();
-        const searchRadius = (settings?.driverSearchRadius || 10) * 1000; // Convert to meters
-
-        console.log(`Finding drivers within ${searchRadius / 1000}km of vendor ${vendorId}`);
-
-        // Find available drivers within radius
-        const drivers = await Driver.find({
-            isOnline: true,
-            approvalStatus: 'approved',
-            currentOrderId: null,
-            currentLocation: {
-                $near: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: vendorCoords
-                    },
-                    $maxDistance: searchRadius
-                }
-            }
-        }).limit(10);
-
-        const driverIds = drivers.map(d => d._id);
-        console.log(`Found ${driverIds.length} available drivers:`, driverIds);
-
-        return driverIds;
-    } catch (error) {
-        console.error('Error finding nearest drivers:', error);
-        return [];
     }
 };
 
@@ -706,13 +765,15 @@ exports.getDriverOrders = async (req, res) => {
         const { driverId } = req.params;
         const Order = require('../Order/model');
         const Vendor = require('../Vendor/model');
+        const OrderAssignment = require('./orderAssignment.model');
 
-        const orders = await Order.find({
+        // 1. Fetch currently active orders assigned to driver
+        const activeOrders = await Order.find({
             driverId: driverId,
             'vendors.orderStatus': { $in: ['Processing', 'Shipped'] }
         }).sort({ createdAt: -1 });
 
-        const mappedOrders = await Promise.all(orders.map(async (order) => {
+        const mappedActive = await Promise.all(activeOrders.map(async (order) => {
             const status = order.vendors[0]?.orderStatus;
             const vendor = await Vendor.findById(order.vendors[0].vendor);
 
@@ -721,6 +782,7 @@ exports.getDriverOrders = async (req, res) => {
                 totalDistance: order.driverDeliveryFee?.totalDistance || 0,
                 earning: order.driverDeliveryFee?.totalFee || 0,
                 status: status,
+                isOffer: false,
                 rawOfferData: {
                     orderId: order.orderId,
                     pickupLocation: vendor ? {
@@ -738,9 +800,54 @@ exports.getDriverOrders = async (req, res) => {
             };
         }));
 
+        // 2. Fetch pending offers from OrderAssignment
+        const pendingOffers = await OrderAssignment.find({
+            driverId: driverId,
+            status: 'pending'
+        }).populate('orderId').sort({ createdAt: -1 });
+
+        const mappedOffers = await Promise.all(pendingOffers.map(async (offer) => {
+            const order = offer.orderId;
+            // If order doesn't exist or already has a driver, it's no longer a valid offer
+            if (!order || order.driverId) {
+                // Background cleanup: mark as expired so it doesn't show up next time
+                if (offer.status === 'pending') {
+                    await OrderAssignment.findByIdAndUpdate(offer._id, { status: 'expired' });
+                }
+                return null;
+            }
+
+            const vendor = await Vendor.findById(order.vendors[0].vendor);
+
+            return {
+                orderId: order.orderId,
+                totalDistance: offer.distance || 0,
+                earning: order.driverDeliveryFee?.totalFee || 0,
+                status: 'Offer',
+                isOffer: true,
+                rawOfferData: {
+                    orderId: order.orderId,
+                    pickupLocation: vendor ? {
+                        latitude: vendor.location.coordinates[1],
+                        longitude: vendor.location.coordinates[0]
+                    } : null,
+                    dropLocation: {
+                        latitude: order.shippingAddress.latitude,
+                        longitude: order.shippingAddress.longitude
+                    },
+                    shippingAddress: order.shippingAddress,
+                    customerName: order.shippingAddress?.name || order.name,
+                    customerPhone: order.shippingAddress?.phone
+                }
+            };
+        }));
+
+        // Filter out any nulls and merge
+        const finalOrders = [...mappedOffers.filter(o => o !== null), ...mappedActive];
+
         res.status(200).json({
             success: true,
-            orders: mappedOrders
+            orders: finalOrders
         });
 
     } catch (error) {

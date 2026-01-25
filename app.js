@@ -125,11 +125,30 @@ io.on("connection", (socket) => {
 
   socket.on("join", (userId) => {
     socket.join(userId);
-    console.log(`User ${userId} joined their private room`);
+    socket.userId = userId; // Store userId on socket for rejection handling
   });
 
-  socket.on("disconnect", () => {
-    console.log("User disconnected");
+  socket.on("order_rejected", async ({ orderId }) => {
+    const OrderAssignment = require("./src/modules/Driver/orderAssignment.model");
+    const Order = require("./src/modules/Order/model");
+    try {
+      // Find actual order document if it was 6-digit code
+      let dbOrderId = orderId;
+      if (!mongoose.Types.ObjectId.isValid(orderId)) {
+        const orderDoc = await Order.findOne({ orderId });
+        if (orderDoc) dbOrderId = orderDoc._id;
+      }
+
+      if (socket.userId) {
+        await OrderAssignment.findOneAndUpdate(
+          { orderId: dbOrderId, driverId: socket.userId },
+          { status: 'rejected' }
+        );
+        console.log(`[SOCKET] Order ${orderId} rejected by driver ${socket.userId}`);
+      }
+    } catch (err) {
+      console.error("Error handling order_rejected:", err);
+    }
   });
 });
 
