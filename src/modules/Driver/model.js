@@ -58,6 +58,10 @@ const driverSchema = new Schema({
             type: [Number], // [longitude, latitude]
             default: [0, 0],
         },
+        address: {
+            type: String,
+            default: "",
+        },
     },
     currentOrderId: {
         type: Schema.Types.ObjectId,

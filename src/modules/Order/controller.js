@@ -999,10 +999,22 @@ exports.acceptOrder = async (req, res) => {
             });
         }
 
-        // Calculate driver delivery fee if current location is provided
+        // Calculate driver delivery fee
         let driverDeliveryFee = null;
+        let finalLocation = currentLocation;
 
-        if (currentLocation && currentLocation.latitude && currentLocation.longitude) {
+        // If currentLocation is missing or 0,0, try to get from Driver DB
+        if (!finalLocation || !finalLocation.latitude || finalLocation.latitude === 0) {
+            const currentDriver = await Driver.findById(deliveryManId);
+            if (currentDriver && currentDriver.currentLocation?.coordinates) {
+                finalLocation = {
+                    latitude: currentDriver.currentLocation.coordinates[1],
+                    longitude: currentDriver.currentLocation.coordinates[0]
+                };
+            }
+        }
+
+        if (finalLocation && finalLocation.latitude && finalLocation.latitude !== 0) {
             // Fetch settings for driver delivery fee configuration
             const Settings = require('../Settings/model');
             let settings = await Settings.findOne();
@@ -1028,7 +1040,7 @@ exports.acceptOrder = async (req, res) => {
                 // Calculate driver delivery fee
                 const { calculateDriverDeliveryFee } = require('../Driver/pricingUtil');
                 driverDeliveryFee = calculateDriverDeliveryFee(
-                    currentLocation,
+                    finalLocation,
                     pickupGeo,
                     dropGeo,
                     settings
@@ -1041,7 +1053,6 @@ exports.acceptOrder = async (req, res) => {
         const pickupOtp = Math.floor(1000 + Math.random() * 9000);
 
         // Update the order with acceptedBy and driver delivery fee
-        // ATOMIC CHECK: Only update if no driver assigned yet (prevents race condition)
         const updateQuery = mongoose.Types.ObjectId.isValid(orderId)
             ? { _id: orderId, driverId: null }
             : { orderId: orderId, driverId: null };
@@ -1070,6 +1081,40 @@ exports.acceptOrder = async (req, res) => {
         await Driver.findByIdAndUpdate(deliveryManId, {
             currentOrderId: updatedOrder._id
         });
+
+        // Clean up OrderAssignments and notify other drivers
+        const OrderAssignment = require('../Driver/orderAssignment.model');
+        try {
+            // Mark this as accepted
+            await OrderAssignment.findOneAndUpdate(
+                { orderId: updatedOrder._id, driverId: deliveryManId },
+                { status: 'accepted' }
+            );
+
+            // Find all other drivers who were notified
+            const otherAssignments = await OrderAssignment.find({
+                orderId: updatedOrder._id,
+                driverId: { $ne: deliveryManId },
+                status: 'pending'
+            });
+
+            // Mark others as expired
+            await OrderAssignment.updateMany(
+                { orderId: updatedOrder._id, driverId: { $ne: deliveryManId } },
+                { status: 'expired' }
+            );
+
+            // Notify other drivers real-time
+            const io = req.app.get('io');
+            if (io) {
+                otherAssignments.forEach(assignment => {
+                    io.to(assignment.driverId.toString()).emit('order_taken', { orderId: updatedOrder.orderId });
+                });
+            }
+
+        } catch (err) {
+            console.error("OrderAssignment cleanup error:", err);
+        }
 
         // Send back the updated order details
         res.status(200).json({
