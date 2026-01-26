@@ -20,6 +20,12 @@ const orderAssignmentSchema = new Schema({
     distance: {
         type: Number, // Distance from driver to pickup
     },
+    totalDistance: {
+        type: Number, // Total distance (driver -> pickup -> drop)
+    },
+    earning: {
+        type: Number, // Total earning for this specific driver-offer
+    },
     createdAt: {
         type: Date,
         default: Date.now,

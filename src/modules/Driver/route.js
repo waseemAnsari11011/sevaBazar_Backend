@@ -58,4 +58,7 @@ router.get("/driver/active-order/:driverId", driverController.getActiveOrder);
 // Route for getting wallet balance
 router.get("/driver/wallet/:driverId", driverController.getWalletBalance);
 
+// Route for getting completed orders history
+router.get("/driver/completed-orders/:driverId", driverController.getCompletedOrders);
+
 module.exports = router;

@@ -690,40 +690,10 @@ exports.updateOrderStatus = async (req, res) => {
         if (newStatus === 'Processing' && !order.driverId) {
             try {
                 const { findNearestDrivers } = require('../Driver/controller');
-                const driverIds = await findNearestDrivers(vendorId);
+                const driverIds = await findNearestDrivers({ vendorId, orderId: order.orderId });
 
                 if (driverIds.length > 0) {
-                    const io = req.app.get('io');
-
-                    // Get vendor location for pickup
-                    const Vendor = require('../Vendor/model');
-                    const vendor = await Vendor.findById(vendorId);
-
-                    if (vendor && vendor.location) {
-                        const offerData = {
-                            orderId: order.orderId,
-                            pickupLocation: {
-                                latitude: vendor.location.coordinates[1],
-                                longitude: vendor.location.coordinates[0]
-                            },
-                            dropLocation: {
-                                latitude: order.shippingAddress.latitude,
-                                longitude: order.shippingAddress.longitude
-                            },
-                            // Include full shipping details for delivery screen
-                            shippingAddress: order.shippingAddress,
-                            customerName: order.shippingAddress?.name || order.name,
-                            customerPhone: order.shippingAddress?.phone
-                        };
-
-                        // Emit to all nearby drivers
-                        driverIds.forEach(driverId => {
-                            io.to(driverId.toString()).emit('new_order_offer', offerData);
-                            console.log(`Emitted order offer to driver: ${driverId}`);
-                        });
-
-                        console.log(`Order ${order.orderId} offered to ${driverIds.length} drivers`);
-                    }
+                    console.log(`Order ${order.orderId} offered to ${driverIds.length} drivers via findNearestDrivers`);
                 }
             } catch (driverError) {
                 console.error('Error notifying drivers:', driverError);
@@ -975,10 +945,25 @@ exports.getUnacceptedOrders = async (req, res) => {
 
 
 
-exports.acceptOrder = async (req, res) => {
+exports.handleOrderOfferResponse = async (req, res) => {
     try {
-        const { orderId, currentLocation } = req.body; // Get orderId and driver's current location
-        const { deliveryManId } = req.params; // Assuming deliveryManId is passed as a URL parameter
+        const { action, orderId, currentLocation } = req.body;
+        const { deliveryManId } = req.params;
+
+        if (action === 'reject') {
+            const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
+            const order = await Order.findOne(query);
+            if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+            const OrderAssignment = require('../Driver/orderAssignment.model');
+            const assignment = await OrderAssignment.findOneAndUpdate(
+                { orderId: order._id, driverId: deliveryManId },
+                { status: 'rejected' },
+                { new: true }
+            );
+            if (!assignment) return res.status(404).json({ success: false, message: 'Offer not found' });
+            return res.status(200).json({ success: true, message: 'Rejected' });
+        }
 
         console.log("orderId==>", orderId);
 
@@ -1132,6 +1117,9 @@ exports.acceptOrder = async (req, res) => {
         });
     }
 };
+
+
+
 
 
 
