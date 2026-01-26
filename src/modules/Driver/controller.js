@@ -1,4 +1,5 @@
 const Driver = require("./model");
+const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 const Settings = require("../Settings/model");
@@ -192,10 +193,15 @@ exports.findNearestDrivers = async (req, res) => {
         let isInternal = false;
         let vendorId, searchLat, searchLon, searchRadius, orderId;
 
-        // Context Detection: If 'res' is not a response object, it's an internal call handled by passing (vendorId)
+        // Context Detection: Handle internal calls
         if (!res || typeof res.status !== 'function') {
             isInternal = true;
-            vendorId = req; // In internal calls, the first argument is vendorId
+            if (typeof req === 'object') {
+                vendorId = req.vendorId;
+                orderId = req.orderId;
+            } else {
+                vendorId = req;
+            }
         } else {
             // API Call from Mobile App
             const { vendorLocation, radius, orderId: oid } = req.body;
@@ -314,12 +320,23 @@ exports.findNearestDrivers = async (req, res) => {
             }
         }));
 
-        // Resolve DB ObjectId if orderId is a 6-digit code for database persistence
-        let dbOrderId = orderId;
-        if (orderId && !require('mongoose').Types.ObjectId.isValid(orderId)) {
-            const Order = require('../Order/model');
-            const foundOrder = await Order.findOne({ orderId: orderId });
-            if (foundOrder) dbOrderId = foundOrder._id;
+        // Resolve DB ObjectId and fetch ORDER DETAILS for full notification
+        let dbOrderId = null;
+        let orderData = null;
+        if (orderId) {
+            try {
+                const Order = require('../Order/model');
+                // Use .lean() for performance and ensure vendors.vendor and customer is populated
+                orderData = await Order.findOne(mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId })
+                    .populate('vendors.vendor')
+                    .populate('customer', 'name contactNumber');
+
+                if (orderData) {
+                    dbOrderId = orderData._id;
+                }
+            } catch (err) {
+                console.error("[findNearestDrivers] Order lookup error:", err.message);
+            }
         }
 
         // Trigger Socket Event to found drivers
@@ -328,28 +345,88 @@ exports.findNearestDrivers = async (req, res) => {
             const io = (req && req.app) ? req.app.get("io") : null;
             const OrderAssignment = require('./orderAssignment.model');
 
-            results.forEach(async (driver) => {
+            // Construct full offer data if possible
+            let fullOfferData = {
+                orderId: orderId,
+                distance: 0 // Will be overridden for each driver
+            };
+
+            if (orderData) {
+                const firstVendor = orderData.vendors[0]?.vendor;
+                fullOfferData = {
+                    ...fullOfferData,
+                    pickupLocation: firstVendor?.location?.coordinates ? {
+                        latitude: firstVendor.location.coordinates[1],
+                        longitude: firstVendor.location.coordinates[0]
+                    } : null,
+                    vendorName: firstVendor?.name || 'Vendor',
+                    vendorAddress: firstVendor?.location?.address ?
+                        `${firstVendor.location.address.addressLine1 || ''}, ${firstVendor.location.address.city || ''}` :
+                        'Vendor Address',
+                    dropLocation: orderData.shippingAddress?.latitude ? {
+                        latitude: orderData.shippingAddress.latitude,
+                        longitude: orderData.shippingAddress.longitude
+                    } : null,
+                    // Extra info for direct display
+                    shippingAddress: orderData.shippingAddress,
+                    customerName: orderData.shippingAddress?.name || orderData.customer?.name || orderData.name,
+                    customerPhone: orderData.shippingAddress?.phone || orderData.customer?.contactNumber
+                };
+            }
+
+            const { calculateDriverDeliveryFee } = require('./pricingUtil');
+
+            for (const driver of results) {
                 const roomId = driver.id.toString();
 
-                // Save assignment to DB for persistence
-                try {
-                    await OrderAssignment.findOneAndUpdate(
-                        { orderId: dbOrderId, driverId: driver.id },
-                        { orderId: dbOrderId, driverId: driver.id, distance: driver.distance, status: 'pending' },
-                        { upsert: true, new: true }
+                let driverEarning = 0;
+                let driverTotalDistance = driver.distance; // Default to just driver->vendor
+
+                // Calculate full fee if we have pickup/drop locations
+                if (fullOfferData.pickupLocation && fullOfferData.dropLocation) {
+                    const feeDetails = calculateDriverDeliveryFee(
+                        {
+                            latitude: driver.location?.coordinates?.[1] || 0,
+                            longitude: driver.location?.coordinates?.[0] || 0
+                        },
+                        fullOfferData.pickupLocation,
+                        fullOfferData.dropLocation,
+                        settings
                     );
-                } catch (err) {
-                    console.error("OrderAssignment save error:", err);
+                    driverEarning = feeDetails.totalFee;
+                    driverTotalDistance = feeDetails.totalDistance;
+                }
+
+                // Save assignment to DB for persistence IF we have the DB ID
+                if (dbOrderId) {
+                    try {
+                        await OrderAssignment.findOneAndUpdate(
+                            { orderId: dbOrderId, driverId: driver.id },
+                            {
+                                orderId: dbOrderId,
+                                driverId: driver.id,
+                                distance: driver.distance, // driver to vendor
+                                totalDistance: driverTotalDistance, // driver -> vendor -> customer
+                                earning: driverEarning,
+                                status: 'pending'
+                            },
+                            { upsert: true, new: true }
+                        );
+                        console.log(`[PERSIST] Offer saved for driver ${driver.name} | Order #${orderId} | Earning: ₹${driverEarning}`);
+                    } catch (err) {
+                        console.error("[PERSIST] OrderAssignment save error:", err.message);
+                    }
                 }
 
                 if (io) {
                     io.to(roomId).emit("new_order_offer", {
-                        orderId,
-                        vendorLocation: { latitude: searchLat, longitude: searchLon },
-                        distance: driver.distance
+                        ...fullOfferData,
+                        distance: driver.distance,
+                        totalDistance: driverTotalDistance,
+                        earning: driverEarning
                     });
                 }
-            });
+            }
         }
 
         if (isInternal) return results.map(d => d.id);
@@ -515,19 +592,29 @@ exports.verifyPickup = async (req, res) => {
             });
         }
 
-        // Update order status to 'Shipped' (Out for Delivery)
+        // Generate 4 digit Delivery OTP
+        const deliveryOtp = Math.floor(1000 + Math.random() * 9000);
+
+        // Update order status to 'Shipped' (Out for Delivery) and set deliveryOtp
         await Order.updateOne(
             { orderId: orderId },
             {
                 $set: {
-                    'vendors.$[].orderStatus': 'Shipped'
+                    'vendors.$[].orderStatus': 'Shipped',
+                    deliveryOtp: deliveryOtp
                 }
             }
         );
 
+        console.log(`\n************************************`);
+        console.log(`[AUTO DELIVERY OTP] Order: ${orderId}`);
+        console.log(`[AUTO DELIVERY OTP] OTP Generated: ${deliveryOtp}`);
+        console.log(`************************************\n`);
+
         res.status(200).json({
             success: true,
-            message: 'Pickup verified successfully. Order is now out for delivery.'
+            message: 'Pickup verified successfully. Order is now out for delivery.',
+            deliveryOtp // Sending back for driver context if needed (optional)
         });
 
     } catch (error) {
@@ -552,14 +639,9 @@ exports.initiateDeliveryCompletion = async (req, res) => {
         }
 
         const Order = require('../Order/model');
-        // Generate 4 digit OTP
-        const deliveryOtp = Math.floor(1000 + Math.random() * 9000);
 
-        const order = await Order.findOneAndUpdate(
-            { orderId: orderId, driverId: driverId },
-            { $set: { deliveryOtp: deliveryOtp } },
-            { new: true }
-        );
+        // Find order to check if it exists and is assigned to this driver
+        const order = await Order.findOne({ orderId: orderId, driverId: driverId });
 
         if (!order) {
             return res.status(404).json({
@@ -568,15 +650,15 @@ exports.initiateDeliveryCompletion = async (req, res) => {
             });
         }
 
-        // TODO: Integrate SMS service to send OTP to customer
+        // OTP is already generated during pickup verification
         console.log(`\n************************************`);
-        console.log(`[DELIVERY OTP] Order: ${orderId}`);
-        console.log(`[DELIVERY OTP] OTP Sent to Customer: ${deliveryOtp}`);
+        console.log(`[DELIVERY INITIATED] Order: ${orderId}`);
+        console.log(`[DELIVERY INITIATED] Driver ${driverId} swiped to deliver.`);
         console.log(`************************************\n`);
 
         res.status(200).json({
             success: true,
-            message: 'OTP has been sent to the customer.'
+            message: 'Delivery process initiated.'
         });
 
     } catch (error) {
@@ -627,8 +709,8 @@ exports.completeDelivery = async (req, res) => {
             });
         }
 
-        // Get delivery fee (assuming it's stored or calculated)
-        const deliveryFee = order.deliveryCharge || 0;
+        // Get delivery fee from the calculated fee stored in the order
+        const deliveryFee = order.driverDeliveryFee?.totalFee || 0;
 
         // Update order status to 'Delivered'
         await Order.updateOne(
@@ -734,13 +816,17 @@ exports.getActiveOrder = async (req, res) => {
                     latitude: vendor.location.coordinates[1],
                     longitude: vendor.location.coordinates[0]
                 } : null,
+                vendorName: vendor?.name || 'Vendor',
+                vendorAddress: vendor?.location?.address ?
+                    `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}` :
+                    'Vendor Address',
                 dropLocation: {
                     latitude: order.shippingAddress.latitude,
                     longitude: order.shippingAddress.longitude
                 },
                 shippingAddress: order.shippingAddress,
-                customerName: order.shippingAddress?.name || order.name,
-                customerPhone: order.shippingAddress?.phone
+                customerName: order.shippingAddress?.name || order.customer?.name || order.name,
+                customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber
             }
         };
 
@@ -789,13 +875,17 @@ exports.getDriverOrders = async (req, res) => {
                         latitude: vendor.location.coordinates[1],
                         longitude: vendor.location.coordinates[0]
                     } : null,
+                    vendorName: vendor?.name || 'Vendor',
+                    vendorAddress: vendor?.location?.address ?
+                        `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}` :
+                        'Vendor Address',
                     dropLocation: {
                         latitude: order.shippingAddress.latitude,
                         longitude: order.shippingAddress.longitude
                     },
                     shippingAddress: order.shippingAddress,
-                    customerName: order.shippingAddress?.name || order.name,
-                    customerPhone: order.shippingAddress?.phone
+                    customerName: order.shippingAddress?.name || order.customer?.name || order.name,
+                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber
                 }
             };
         }));
@@ -821,8 +911,8 @@ exports.getDriverOrders = async (req, res) => {
 
             return {
                 orderId: order.orderId,
-                totalDistance: offer.distance || 0,
-                earning: order.driverDeliveryFee?.totalFee || 0,
+                totalDistance: offer.totalDistance || offer.distance || 0,
+                earning: offer.earning || 0,
                 status: 'Offer',
                 isOffer: true,
                 rawOfferData: {
@@ -831,13 +921,17 @@ exports.getDriverOrders = async (req, res) => {
                         latitude: vendor.location.coordinates[1],
                         longitude: vendor.location.coordinates[0]
                     } : null,
+                    vendorName: vendor?.name || 'Vendor',
+                    vendorAddress: vendor?.location?.address ?
+                        `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}` :
+                        'Vendor Address',
                     dropLocation: {
                         latitude: order.shippingAddress.latitude,
                         longitude: order.shippingAddress.longitude
                     },
                     shippingAddress: order.shippingAddress,
-                    customerName: order.shippingAddress?.name || order.name,
-                    customerPhone: order.shippingAddress?.phone
+                    customerName: order.shippingAddress?.name || order.customer?.name || order.name,
+                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber
                 }
             };
         }));
@@ -852,6 +946,38 @@ exports.getDriverOrders = async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching driver orders:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error',
+            error: error.message
+        });
+    }
+};
+
+exports.getCompletedOrders = async (req, res) => {
+    try {
+        const { driverId } = req.params;
+        const Order = require('../Order/model');
+
+        const completedOrders = await Order.find({
+            driverId: driverId,
+            'vendors.orderStatus': 'Delivered'
+        }).sort({ updatedAt: -1 });
+
+        const mappedHistory = completedOrders.map(order => ({
+            orderId: order.orderId,
+            earning: order.driverDeliveryFee?.totalFee || 0,
+            date: order.updatedAt,
+            customerName: order.shippingAddress?.name || order.name,
+            address: order.shippingAddress?.address || 'N/A'
+        }));
+
+        res.status(200).json({
+            success: true,
+            orders: mappedHistory
+        });
+    } catch (error) {
+        console.error('Error fetching completed orders:', error);
         res.status(500).json({
             success: false,
             message: 'Server Error',
