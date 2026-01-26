@@ -3,6 +3,9 @@ const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 const Settings = require("../Settings/model");
+const Customer = require('../Customer/model');
+const { sendPushNotification } = require('../utils/pushNotificationUtil');
+const { calculateDistance, calculateDeliveryFee } = require('../Driver/pricingUtil');
 
 const secret = process.env.JWT_SECRET;
 
@@ -152,6 +155,7 @@ exports.updateOnlineStatus = async (req, res) => {
         res.status(500).json({ message: "Internal server error", error: error.message });
     }
 };
+
 
 exports.updateLocation = async (req, res) => {
     try {
@@ -376,19 +380,35 @@ exports.findNearestDrivers = async (req, res) => {
 
             const { calculateDriverDeliveryFee } = require('./pricingUtil');
 
+            // Helper to normalize location format
+            const normalizeLocation = (loc) => {
+                if (!loc) return null;
+                if (loc.latitude !== undefined && loc.longitude !== undefined) return loc;
+                if (loc.coordinates && loc.coordinates.length === 2) {
+                    return {
+                        latitude: loc.coordinates[1],
+                        longitude: loc.coordinates[0]
+                    };
+                }
+                // Handle case where location might be just the coordinates array
+                if (Array.isArray(loc) && loc.length === 2) {
+                    return { latitude: loc[1], longitude: loc[0] };
+                }
+                return loc;
+            };
+
             for (const driver of results) {
                 const roomId = driver.id.toString();
 
                 let driverEarning = 0;
                 let driverTotalDistance = driver.distance; // Default to just driver->vendor
 
+                const finalDriverLoc = normalizeLocation(driver.location);
+
                 // Calculate full fee if we have pickup/drop locations
-                if (fullOfferData.pickupLocation && fullOfferData.dropLocation) {
+                if (fullOfferData.pickupLocation && fullOfferData.dropLocation && finalDriverLoc) {
                     const feeDetails = calculateDriverDeliveryFee(
-                        {
-                            latitude: driver.location?.coordinates?.[1] || 0,
-                            longitude: driver.location?.coordinates?.[0] || 0
-                        },
+                        finalDriverLoc,
                         fullOfferData.pickupLocation,
                         fullOfferData.dropLocation,
                         settings
@@ -448,6 +468,7 @@ const Vendor = require("../Vendor/model");
 
 // Unified delivery charge calculation endpoint
 exports.calculateDriverFee = async (req, res) => {
+    console.log("[DEBUG] calculateDriverFee called with body:", JSON.stringify(req.body, null, 2));
     try {
         const {
             currentLocation,
@@ -456,6 +477,19 @@ exports.calculateDriverFee = async (req, res) => {
             vendors,
             shippingAddress
         } = req.body;
+
+        // Helper to normalize location format (handle {latitude, longitude} and {coordinates: [lon, lat]})
+        const normalizeLocation = (loc) => {
+            if (!loc) return null;
+            if (loc.latitude !== undefined && loc.longitude !== undefined) return loc;
+            if (loc.coordinates && loc.coordinates.length === 2) {
+                return {
+                    latitude: loc.coordinates[1],
+                    longitude: loc.coordinates[0]
+                };
+            }
+            return loc;
+        };
 
         // Fetch settings
         const Settings = require("../Settings/model");
@@ -468,7 +502,8 @@ exports.calculateDriverFee = async (req, res) => {
 
         // NEW FORMAT (from Customer App): vendors array and shippingAddress
         if (vendors && Array.isArray(vendors) && shippingAddress) {
-            if (!shippingAddress.latitude || !shippingAddress.longitude) {
+            const finalShipping = normalizeLocation(shippingAddress);
+            if (!finalShipping?.latitude || !finalShipping?.longitude) {
                 return res.status(400).json({ error: "Shipping address must have latitude and longitude" });
             }
 
@@ -482,17 +517,12 @@ exports.calculateDriverFee = async (req, res) => {
                     continue;
                 }
 
-                console.log(`Calculating for Vendor: ${vendor.name}, Coords: [${vendor.location.coordinates[1]}, ${vendor.location.coordinates[0]}]`);
-                console.log(`Shipping Address Coords: [${shippingAddress.latitude}, ${shippingAddress.longitude}]`);
-
                 const distance = calculateDistance(
                     vendor.location.coordinates[1], // latitude
                     vendor.location.coordinates[0], // longitude
-                    shippingAddress.latitude,
-                    shippingAddress.longitude
+                    finalShipping.latitude,
+                    finalShipping.longitude
                 );
-
-                console.log(`Calculated Distance: ${distance.toFixed(2)} km`);
 
                 const charge = calculateDeliveryFee(distance, settings);
 
@@ -514,21 +544,31 @@ exports.calculateDriverFee = async (req, res) => {
         }
 
         // DRIVER EARNINGS FORMAT: 3 locations provided (currentLocation, pickupLocation, dropLocation)
-        if (currentLocation && pickupLocation && dropLocation) {
-            // Validate input
-            if (!currentLocation.latitude || !currentLocation.longitude ||
-                !pickupLocation.latitude || !pickupLocation.longitude ||
-                !dropLocation.latitude || !dropLocation.longitude) {
+        const finalCurrent = normalizeLocation(currentLocation);
+        const finalPickup = normalizeLocation(pickupLocation);
+        const finalDrop = normalizeLocation(dropLocation);
+
+        if (finalCurrent && finalPickup && finalDrop) {
+            console.log("[DEBUG] Calculating Driver Delivery Fee with normalized locations:", {
+                finalCurrent, finalPickup, finalDrop
+            });
+            // Validate input (check strict undefined/null to allow 0,0 coordinates)
+            if (finalCurrent.latitude === undefined || finalCurrent.latitude === null ||
+                finalCurrent.longitude === undefined || finalCurrent.longitude === null ||
+                finalPickup.latitude === undefined || finalPickup.latitude === null ||
+                finalPickup.longitude === undefined || finalPickup.longitude === null ||
+                finalDrop.latitude === undefined || finalDrop.latitude === null ||
+                finalDrop.longitude === undefined || finalDrop.longitude === null) {
                 return res.status(400).json({
-                    error: "Each location must have latitude and longitude"
+                    error: "Each location must have valid latitude and longitude"
                 });
             }
 
             // Calculate driver delivery fee
             const feeBreakdown = calculateDriverDeliveryFee(
-                currentLocation,
-                pickupLocation,
-                dropLocation,
+                finalCurrent,
+                finalPickup,
+                finalDrop,
                 settings
             );
 
@@ -549,7 +589,7 @@ exports.calculateDriverFee = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error calculating delivery fee:", error);
+        console.error("[DEBUG] Error calculating delivery fee:", error);
         res.status(500).json({ error: "Internal Server Error", message: error.message });
     }
 };
@@ -595,16 +635,30 @@ exports.verifyPickup = async (req, res) => {
         // Generate 4 digit Delivery OTP
         const deliveryOtp = Math.floor(1000 + Math.random() * 9000);
 
-        // Update order status to 'Shipped' (Out for Delivery) and set deliveryOtp
-        await Order.updateOne(
-            { orderId: orderId },
-            {
-                $set: {
-                    'vendors.$[].orderStatus': 'Shipped',
-                    deliveryOtp: deliveryOtp
-                }
+        // Update order status to 'Shipped' (Out for Delivery), set deliveryOtp, and set arrivalAt
+        const deliveryTime = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+
+        order.vendors.forEach(vendor => {
+            vendor.orderStatus = 'Shipped';
+            vendor.products.forEach(product => {
+                product.arrivalAt = deliveryTime;
+            });
+        });
+        order.deliveryOtp = deliveryOtp;
+
+        await order.save();
+
+        // Send push notification to customer
+        const customer = await Customer.findById(order.customer);
+        if (customer && customer.fcmDeviceToken) {
+            const title = 'Order Out for Delivery';
+            const body = `Your order ${orderId} is out for delivery. Use OTP ${deliveryOtp} to receive it.`;
+            try {
+                await sendPushNotification(customer.fcmDeviceToken, title, body);
+            } catch (err) {
+                console.error('Error sending pickup notification:', err);
             }
-        );
+        }
 
         console.log(`\n************************************`);
         console.log(`[AUTO DELIVERY OTP] Order: ${orderId}`);
@@ -614,7 +668,8 @@ exports.verifyPickup = async (req, res) => {
         res.status(200).json({
             success: true,
             message: 'Pickup verified successfully. Order is now out for delivery.',
-            deliveryOtp // Sending back for driver context if needed (optional)
+            deliveryOtp,
+            order
         });
 
     } catch (error) {
@@ -712,15 +767,29 @@ exports.completeDelivery = async (req, res) => {
         // Get delivery fee from the calculated fee stored in the order
         const deliveryFee = order.driverDeliveryFee?.totalFee || 0;
 
-        // Update order status to 'Delivered'
-        await Order.updateOne(
-            { orderId: orderId },
-            {
-                $set: {
-                    'vendors.$[].orderStatus': 'Delivered'
-                }
+        // Update order status to 'Delivered' and calculate deliveredInMin
+        const currentTime = new Date();
+        const createdAt = order.createdAt;
+        const deliveredInMin = Math.floor((currentTime - createdAt) / 60000);
+
+        order.vendors.forEach(vendor => {
+            vendor.orderStatus = 'Delivered';
+            vendor.deliveredInMin = deliveredInMin;
+        });
+
+        await order.save();
+
+        // Send push notification to customer
+        const customerDetails = await Customer.findById(order.customer);
+        if (customerDetails && customerDetails.fcmDeviceToken) {
+            const title = 'Order Delivered';
+            const body = `Your order ${orderId} has been delivered successfully. Thank you for shopping with us!`;
+            try {
+                await sendPushNotification(customerDetails.fcmDeviceToken, title, body);
+            } catch (err) {
+                console.error('Error sending delivery notification:', err);
             }
-        );
+        }
 
         // Update driver: clear currentOrderId and add to wallet
         const driver = await Driver.findById(driverId);

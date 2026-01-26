@@ -495,8 +495,7 @@ exports.getOrdersByVendor = async (req, res) => {
             // Project to reshape the output document
             {
                 $project: {
-                    _id: 0,
-                    orderId: "$_id.orderId",
+                    _id: "$_id.orderId",
                     shortId: "$_id.shortId",
                     customer: "$_id.customer",
                     shippingAddress: "$_id.shippingAddress",
@@ -611,8 +610,7 @@ exports.getRecentOrdersByVendor = async (req, res) => {
             },
             {
                 $project: {
-                    _id: 0,
-                    orderId: "$_id.orderId",
+                    _id: "$_id.orderId",
                     customer: "$_id.customer",
                     shippingAddress: "$_id.shippingAddress",
                     isPaymentVerified: "$_id.isPaymentVerified",
@@ -946,6 +944,7 @@ exports.getUnacceptedOrders = async (req, res) => {
 
 
 exports.handleOrderOfferResponse = async (req, res) => {
+    console.log("[DEBUG] handleOrderOfferResponse called with body:", JSON.stringify(req.body, null, 2));
     try {
         const { action, orderId, currentLocation } = req.body;
         const { deliveryManId } = req.params;
@@ -987,6 +986,22 @@ exports.handleOrderOfferResponse = async (req, res) => {
         // Calculate driver delivery fee
         let driverDeliveryFee = null;
         let finalLocation = currentLocation;
+
+        // Helper to normalize location format
+        const normalizeLocation = (loc) => {
+            if (!loc) return null;
+            if (loc.latitude !== undefined && loc.longitude !== undefined) return loc;
+            if (loc.coordinates && loc.coordinates.length === 2) {
+                return {
+                    latitude: loc.coordinates[1],
+                    longitude: loc.coordinates[0]
+                };
+            }
+            return loc;
+        };
+
+        finalLocation = normalizeLocation(finalLocation);
+        console.log("[DEBUG] handleOrderOfferResponse normalized location:", finalLocation);
 
         // If currentLocation is missing or 0,0, try to get from Driver DB
         if (!finalLocation || !finalLocation.latitude || finalLocation.latitude === 0) {
@@ -1129,11 +1144,20 @@ exports.handleOrderOfferResponse = async (req, res) => {
 exports.getOrderDetailsByVendor = async (req, res) => {
     try {
         const { orderId, vendorId } = req.params;
-        const oId = new mongoose.Types.ObjectId(orderId);
+        console.log(`[DEBUG] getOrderDetailsByVendor: orderId=${orderId}, vendorId=${vendorId}`);
+
+        let matchQuery = {};
+        if (mongoose.Types.ObjectId.isValid(orderId)) {
+            matchQuery = { _id: new mongoose.Types.ObjectId(orderId) };
+        } else {
+            matchQuery = { orderId: orderId };
+        }
+
         const vId = new mongoose.Types.ObjectId(vendorId);
+        console.log(`[DEBUG] Match Query:`, JSON.stringify(matchQuery), `vId=${vId}`);
 
         const order = await Order.aggregate([
-            { $match: { _id: oId } },
+            { $match: matchQuery },
             {
                 $addFields: {
                     customer: {
@@ -1190,9 +1214,11 @@ exports.getOrderDetailsByVendor = async (req, res) => {
         ]);
 
         if (!order || order.length === 0) {
+            console.log(`[DEBUG] Order NOT found for oId=${oId}, vId=${vId}`);
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
 
+        console.log(`[DEBUG] Order found: ${order[0].orderId}`);
         res.status(200).json({ success: true, data: order[0] });
     } catch (error) {
         console.error("Error fetching order details:", error);
