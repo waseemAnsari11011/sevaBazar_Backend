@@ -25,4 +25,7 @@ router.put('/delivery/order-offer-response/:deliveryManId', orderController.hand
 
 
 
+// ... (other routes)
+router.get('/order/invoice/:orderId', orderController.getOrderInvoice);
+
 module.exports = router;

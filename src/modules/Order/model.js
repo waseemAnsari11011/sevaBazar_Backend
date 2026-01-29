@@ -67,6 +67,9 @@ const orderSchema = new Schema({
       distance: {
         type: Number,
       },
+      deliveryChargeDescription: {
+        type: String,
+      },
       shippingFee: {
         type: Number,
         default: 0,

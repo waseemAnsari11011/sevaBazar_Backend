@@ -69,10 +69,13 @@ exports.createOrderRazorpay = async (req, res) => {
                 const vendorLon = vendorDetails.location.coordinates[0];
                 const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
 
-                vendor.deliveryCharge = Number(calculateDeliveryFee(distance, settings).toFixed(2));
+                const feeInfo = calculateDeliveryFee(distance, settings);
+                vendor.deliveryCharge = Number(feeInfo.amount.toFixed(2));
+                vendor.deliveryChargeDescription = feeInfo.description;
                 vendor.distance = Number(distance.toFixed(2));
             } else {
                 vendor.deliveryCharge = 0; // Default if coordinates missing
+                vendor.deliveryChargeDescription = "Missing coordinates";
             }
         }
 
@@ -290,9 +293,12 @@ exports.createOrder = async (req, res) => {
                 const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
 
                 vendor.distance = Number(distance.toFixed(2)); // Save the distance
-                vendor.deliveryCharge = Number(calculateDeliveryFee(distance, settings).toFixed(2));
+                const feeInfo = calculateDeliveryFee(distance, settings);
+                vendor.deliveryCharge = Number(feeInfo.amount.toFixed(2));
+                vendor.deliveryChargeDescription = feeInfo.description;
             } else {
                 vendor.deliveryCharge = 0;
+                vendor.deliveryChargeDescription = "Missing coordinates";
             }
         }
 
@@ -852,6 +858,7 @@ exports.getOrdersByCustomerId = async (req, res) => {
             'vendors.orderStatus': { $nin: ['Delivered', 'Cancelled'] }
         })
             .populate('customer')
+            .populate('driverId')
             .populate('vendors.vendor')
             .populate({
                 path: 'vendors.products.product',
@@ -949,14 +956,39 @@ exports.handleOrderOfferResponse = async (req, res) => {
         const { action, orderId, currentLocation } = req.body;
         const { deliveryManId } = req.params;
 
-        if (action === 'reject') {
-            const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
-            const order = await Order.findOne(query);
-            if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+        const Order = require('./model');
+        const ChatOrder = require('../ChatOrdrer/model');
 
+        let order = await Order.findOne(mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId });
+        let isChatOrder = false;
+
+        if (!order) {
+            order = await ChatOrder.findOne(mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId });
+            if (order) isChatOrder = true;
+        }
+
+        if (!order) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        const dbOrderIdForAssignment = order._id;
+
+        const Driver = require('../Driver/model');
+        const driver = await Driver.findById(deliveryManId);
+
+        if (!driver) {
+            return res.status(404).json({ success: false, message: 'Driver not found' });
+        }
+
+        // Check if driver already has an active order
+        if (action === 'accept' && driver.currentOrderId) {
+            return res.status(400).json({ success: false, message: 'You already have an active order. Please complete it first.' });
+        }
+
+        if (action === 'reject') {
             const OrderAssignment = require('../Driver/orderAssignment.model');
             const assignment = await OrderAssignment.findOneAndUpdate(
-                { orderId: order._id, driverId: deliveryManId },
+                { orderId: dbOrderIdForAssignment, driverId: deliveryManId },
                 { status: 'rejected' },
                 { new: true }
             );
@@ -964,23 +996,11 @@ exports.handleOrderOfferResponse = async (req, res) => {
             return res.status(200).json({ success: true, message: 'Rejected' });
         }
 
-        console.log("orderId==>", orderId);
-
-        // Find the order first to get vendor and customer locations
-        // Flexibly handle both MongoDB _id and custom 6-digit orderId
-        const query = mongoose.Types.ObjectId.isValid(orderId)
-            ? { _id: orderId }
-            : { orderId: orderId };
-
-        const order = await Order.findOne(query)
-            .populate('customer', 'name contactNumber')
-            .populate('vendors.vendor', 'location');
-
-        if (!order) {
-            return res.status(404).json({
-                success: false,
-                message: 'Order not found'
-            });
+        // POPULATE VENDOR FOR FEE CALCULATION
+        if (isChatOrder) {
+            await order.populate('vendor');
+        } else {
+            await order.populate('vendors.vendor');
         }
 
         // Calculate driver delivery fee
@@ -1001,10 +1021,10 @@ exports.handleOrderOfferResponse = async (req, res) => {
         };
 
         finalLocation = normalizeLocation(finalLocation);
-        console.log("[DEBUG] handleOrderOfferResponse normalized location:", finalLocation);
 
         // If currentLocation is missing or 0,0, try to get from Driver DB
         if (!finalLocation || !finalLocation.latitude || finalLocation.latitude === 0) {
+            const Driver = require('../Driver/model');
             const currentDriver = await Driver.findById(deliveryManId);
             if (currentDriver && currentDriver.currentLocation?.coordinates) {
                 finalLocation = {
@@ -1024,7 +1044,7 @@ exports.handleOrderOfferResponse = async (req, res) => {
             }
 
             // Get pickup location (first vendor's location)
-            const firstVendor = order.vendors[0]?.vendor;
+            const firstVendor = isChatOrder ? order.vendor : order.vendors[0]?.vendor;
             if (firstVendor && firstVendor.location && firstVendor.location.coordinates) {
                 const pickupGeo = {
                     latitude: firstVendor.location.coordinates[1],
@@ -1052,63 +1072,50 @@ exports.handleOrderOfferResponse = async (req, res) => {
         // Generate 4-digit Pickup OTP
         const pickupOtp = Math.floor(1000 + Math.random() * 9000);
 
-        // Update the order with acceptedBy and driver delivery fee
-        const updateQuery = mongoose.Types.ObjectId.isValid(orderId)
-            ? { _id: orderId, driverId: null }
-            : { orderId: orderId, driverId: null };
-
-        const updatedOrder = await Order.findOneAndUpdate(
-            updateQuery,
-            {
-                acceptedBy: deliveryManId,
-                driverId: deliveryManId,
-                pickupOtp: pickupOtp,
-                is_new: false,
-                ...(driverDeliveryFee && { driverDeliveryFee })
-            },
-            { new: true }
-        ).populate('customer', 'name contactNumber');
-
-        // If order is null, it means another driver already accepted
-        if (!updatedOrder) {
-            return res.status(409).json({
-                success: false,
-                message: 'Order already accepted by another driver'
-            });
+        // Check if already assigned to someone else
+        if (order.driverId) {
+            return res.status(400).json({ success: false, message: 'Order already accepted by another driver' });
         }
+
+        // Update the order with driverId and pickupOtp
+        order.driverId = deliveryManId;
+        order.pickupOtp = pickupOtp;
+        order.driverDeliveryFee = driverDeliveryFee;
+        order.is_new = false;
+        order.acceptedBy = deliveryManId;
+
+        await order.save();
 
         // Link Order to Driver
         await Driver.findByIdAndUpdate(deliveryManId, {
-            currentOrderId: updatedOrder._id
+            currentOrderId: dbOrderIdForAssignment
         });
 
-        // Clean up OrderAssignments and notify other drivers
+        // Update successful assignment in OrderAssignment and notify others
         const OrderAssignment = require('../Driver/orderAssignment.model');
         try {
             // Mark this as accepted
             await OrderAssignment.findOneAndUpdate(
-                { orderId: updatedOrder._id, driverId: deliveryManId },
+                { orderId: dbOrderIdForAssignment, driverId: deliveryManId },
                 { status: 'accepted' }
             );
 
-            // Find all other drivers who were notified
-            const otherAssignments = await OrderAssignment.find({
-                orderId: updatedOrder._id,
-                driverId: { $ne: deliveryManId },
-                status: 'pending'
-            });
-
             // Mark others as expired
             await OrderAssignment.updateMany(
-                { orderId: updatedOrder._id, driverId: { $ne: deliveryManId } },
+                { orderId: dbOrderIdForAssignment, driverId: { $ne: deliveryManId } },
                 { status: 'expired' }
             );
 
             // Notify other drivers real-time
             const io = req.app.get('io');
             if (io) {
+                // Find all other drivers who were notified to emit order_taken
+                const otherAssignments = await OrderAssignment.find({
+                    orderId: dbOrderIdForAssignment,
+                    driverId: { $ne: deliveryManId }
+                });
                 otherAssignments.forEach(assignment => {
-                    io.to(assignment.driverId.toString()).emit('order_taken', { orderId: updatedOrder.orderId });
+                    io.to(assignment.driverId.toString()).emit('order_taken', { orderId: orderId });
                 });
             }
 
@@ -1120,7 +1127,7 @@ exports.handleOrderOfferResponse = async (req, res) => {
         res.status(200).json({
             success: true,
             message: 'Order accepted successfully',
-            order: updatedOrder,
+            order,
             driverDeliveryFee
         });
     } catch (error) {
@@ -1201,14 +1208,48 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                     customerNameFallback: { $first: "$name" },
                     pickupOtp: { $first: "$pickupOtp" },
                     driverId: { $first: "$driverId" },
+                    deliveryCharge: { $first: "$vendors.deliveryCharge" },
+                    shippingFee: { $first: "$vendors.shippingFee" },
                     shippingAddress: { $first: "$shippingAddress" },
                     items: {
                         $push: {
                             name: { $ifNull: ["$productDetails.name", "$vendors.products.name"] },
                             price: "$vendors.products.price",
-                            quantity: "$vendors.products.quantity"
+                            quantity: "$vendors.products.quantity",
+                            totalAmount: "$vendors.products.totalAmount",
+                            image: { $arrayElemAt: [{ $arrayElemAt: ["$vendors.products.variations.images", 0] }, 0] },
+                            variations: "$vendors.products.variations"
                         }
-                    }
+                    },
+                    driver: { $first: "$driver" }
+                }
+            },
+            {
+                $lookup: {
+                    from: "drivers",
+                    localField: "driverId",
+                    foreignField: "_id",
+                    as: "driver"
+                }
+            },
+            { $unwind: { path: "$driver", preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 1,
+                    orderId: 1,
+                    orderStatus: 1,
+                    createdAt: 1,
+                    totalAmount: 1,
+                    deliveryCharge: 1,
+                    shippingFee: 1,
+                    customer: 1,
+                    customerNameFallback: 1,
+                    pickupOtp: 1,
+                    driverId: 1,
+                    shippingAddress: 1,
+                    items: 1,
+                    riderName: "$driver.personalDetails.name",
+                    riderContact: "$driver.personalDetails.phone"
                 }
             }
         ]);
@@ -1261,5 +1302,133 @@ exports.seedTestOrder = async (req, res) => {
     } catch (error) {
         console.error("Seed error:", error);
         res.status(500).json({ success: false, error: error.message });
+    }
+}; exports.getOrderInvoice = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const vendorId = req.query.vendorId; // Optional: to filter specific vendor products if needed
+
+        const order = await Order.findById(orderId)
+            .populate('customer')
+            .populate('vendors.vendor');
+
+        if (!order) {
+            return res.status(404).send('Order not found');
+        }
+
+        // Aggregate all products from all vendors for the invoice, or filter by vendorId if provided
+        let products = [];
+        let subtotal = 0;
+
+        order.vendors.forEach(v => {
+            if (!vendorId || v.vendor?._id.toString() === vendorId) {
+                v.products.forEach(p => {
+                    products.push({
+                        name: p.name,
+                        quantity: p.quantity,
+                        price: p.price,
+                        totalAmount: p.totalAmount
+                    });
+                    subtotal += p.totalAmount;
+                });
+            }
+        });
+
+        const shippingFee = order.shippingFee || 0;
+        const grandTotal = subtotal + shippingFee;
+
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Invoice #${order.orderId}</title>
+    <style>
+        body { font-family: 'Helvetica Neue', 'Helvetica', Helvetica, Arial, sans-serif; color: #555; }
+        .invoice-box { max-width: 800px; margin: auto; padding: 30px; border: 1px solid #eee; box-shadow: 0 0 10px rgba(0, 0, 0, .15); font-size: 16px; line-height: 24px; color: #555; }
+        .invoice-box table { width: 100%; line-height: inherit; text-align: left; border-collapse: collapse; }
+        .invoice-box table td { padding: 5px; vertical-align: top; }
+        .invoice-box table tr td:nth-child(2) { text-align: right; }
+        .invoice-box table tr.top table td { padding-bottom: 20px; }
+        .invoice-box table tr.top table td.title { font-size: 45px; line-height: 45px; color: #333; }
+        .invoice-box table tr.information table td { padding-bottom: 40px; }
+        .invoice-box table tr.heading td { background: #eee; border-bottom: 1px solid #ddd; font-weight: bold; }
+        .invoice-box table tr.details td { padding-bottom: 20px; }
+        .invoice-box table tr.item td { border-bottom: 1px solid #eee; }
+        .invoice-box table tr.item.last td { border-bottom: none; }
+        .invoice-box table tr.total td:nth-child(2) { border-top: 2px solid #eee; font-weight: bold; }
+        @media only screen and (max-width: 600px) {
+            .invoice-box table tr.top table td { width: 100%; display: block; text-align: center; }
+            .invoice-box table tr.information table td { width: 100%; display: block; text-align: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-box">
+        <table>
+            <tr class="top">
+                <td colspan="2">
+                    <table>
+                        <tr>
+                            <td class="title">SevaBazar</td>
+                            <td>
+                                Invoice #: ${order.orderId}<br>
+                                Created: ${new Date(order.createdAt).toLocaleDateString()}<br>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+            <tr class="information">
+                <td colspan="2">
+                    <table>
+                        <tr>
+                            <td>
+                                <strong>Vendor(s):</strong><br>
+                                ${order.vendors.map(v => v.vendor?.name).join(', ') || 'N/A'}
+                            </td>
+                            <td>
+                                <strong>Customer:</strong><br>
+                                ${order.customer?.name || order.name || 'N/A'}<br>
+                                ${order.customer?.contactNumber || ''}
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+            <tr class="heading">
+                <td>Item</td>
+                <td>Price</td>
+            </tr>
+            ${products.map(product => `
+            <tr class="item">
+                <td>${product.name} (x${product.quantity})</td>
+                <td>₹${parseFloat(product.totalAmount).toFixed(2)}</td>
+            </tr>
+            `).join('')}
+            <tr class="total">
+                <td></td>
+                <td>Subtotal: ₹${subtotal.toFixed(2)}</td>
+            </tr>
+            <tr class="total">
+                <td></td>
+                <td>Shipping: ₹${shippingFee.toFixed(2)}</td>
+            </tr>
+            <tr class="total">
+                <td></td>
+                <td>Total: ₹${grandTotal.toFixed(2)}</td>
+            </tr>
+        </table>
+        <div style="margin-top: 50px; text-align: center; font-size: 12px; color: #999;">
+            Thank you for shopping with SevaBazar!
+        </div>
+    </div>
+</body>
+</html>`;
+        res.set('Content-Type', 'text/html');
+        res.send(html);
+    } catch (error) {
+        console.error('Error generating invoice:', error);
+        res.status(500).send('Internal Server Error');
     }
 };

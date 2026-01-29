@@ -27,23 +27,72 @@ const settingsSchema = new mongoose.Schema(
       type: Number,
       default: 5, // Default search radius in kilometers
     },
-    // Unified pricing configuration used for both customer delivery and driver payment
+    driverPayoutMode: {
+      type: String,
+      enum: ["tiered", "formula"],
+      default: "tiered", // 'tiered' uses ranges, 'formula' uses Base + Per Km
+    },
+    // Formula-based driver payout config
     driverDeliveryFee: {
       basePay: {
         type: Number,
-        default: 30, // ₹30 for first 5 km
+        default: 30,
       },
       baseDistance: {
         type: Number,
-        default: 5, // km covered by base pay
+        default: 5,
       },
       perKmRate: {
         type: Number,
-        default: 10, // ₹10 per km beyond base distance
+        default: 10,
       },
     },
+    // Tiered delivery charge configuration (for Customers)
+    deliveryChargeConfig: [
+      {
+        conditionType: {
+          type: String,
+          enum: ["range", "greaterThan", "lessThan"],
+          default: "range",
+        },
+        minDistance: {
+          type: Number,
+          default: 0,
+        },
+        maxDistance: {
+          type: Number,
+          default: 0,
+        },
+        deliveryFee: {
+          type: Number,
+          required: true,
+        },
+      },
+    ],
+    // Tiered driver payout configuration (for Drivers)
+    driverPaymentConfig: [
+      {
+        conditionType: {
+          type: String,
+          enum: ["range", "greaterThan", "lessThan"],
+          default: "range",
+        },
+        minDistance: {
+          type: Number,
+          default: 0,
+        },
+        maxDistance: {
+          type: Number,
+          default: 0,
+        },
+        deliveryFee: {
+          type: Number,
+          required: true,
+        },
+      },
+    ],
   },
-  { timestamps: true }
+  { timestamps: true, strict: false }
 );
 
 const Settings = mongoose.model("Settings", settingsSchema);

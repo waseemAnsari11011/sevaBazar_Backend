@@ -81,12 +81,22 @@ exports.getSettings = async (req, res) => {
  */
 exports.updateSettings = async (req, res) => {
   try {
-    const { vendorVisibilityRadius, driverSearchRadius, driverDeliveryFee } = req.body;
+    const {
+      vendorVisibilityRadius,
+      driverSearchRadius,
+      driverDeliveryFee,
+      deliveryChargeConfig,
+      driverPaymentConfig,
+      driverPayoutMode
+    } = req.body;
 
     const updateData = {};
     if (vendorVisibilityRadius !== undefined) updateData.vendorVisibilityRadius = vendorVisibilityRadius;
     if (driverSearchRadius !== undefined) updateData.driverSearchRadius = driverSearchRadius;
     if (driverDeliveryFee !== undefined) updateData.driverDeliveryFee = driverDeliveryFee;
+    if (deliveryChargeConfig !== undefined) updateData.deliveryChargeConfig = deliveryChargeConfig;
+    if (driverPaymentConfig !== undefined) updateData.driverPaymentConfig = driverPaymentConfig;
+    if (driverPayoutMode !== undefined) updateData.driverPayoutMode = driverPayoutMode;
 
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({
