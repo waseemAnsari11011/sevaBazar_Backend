@@ -242,8 +242,6 @@ exports.sendOtp = async (req, res) => {
 exports.saveAddressAndLocalities = async (req, res) => {
   try {
     const {
-      addressDescription,
-      addressLine1,
       landmark,
       city,
       state,
@@ -253,6 +251,7 @@ exports.saveAddressAndLocalities = async (req, res) => {
       phone,
       latitude,
       longitude,
+      addressLine2,
     } = req.body;
     const { id } = req.params; // Assuming userId is passed in the URL params or request body
 
@@ -267,8 +266,7 @@ exports.saveAddressAndLocalities = async (req, res) => {
     const newAddress = {
       name,
       phone,
-      addressDescription,
-      address: addressLine1,
+      addressLine2,
       landmark,
       city,
       state,
@@ -278,9 +276,20 @@ exports.saveAddressAndLocalities = async (req, res) => {
       longitude,
       isActive: true, // Always active since it's the only one
     };
-    
-    // Replace the entire array
-    user.shippingAddresses = [newAddress];
+
+    // Check if the user has any existing addresses
+    if (user.shippingAddresses.length === 0) {
+      // If no addresses exist, the first one must be active
+      newAddress.isActive = true;
+    } else if (newAddress.isActive) {
+      // If the new address is set to be active, deactivate all other addresses
+      user.shippingAddresses.forEach((addr) => {
+        addr.isActive = false;
+      });
+    }
+
+    // Add the new address to the array
+    user.shippingAddresses.push(newAddress);
 
     // Set availableLocalities to the postalCode of the active address
     const activeAddress = user.shippingAddresses.find((addr) => addr.isActive);
@@ -303,8 +312,6 @@ exports.updateShippingAddress = async (req, res) => {
   try {
     const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
     const {
-      addressDescription,
-      addressLine1,
       landmark,
       city,
       state,
@@ -315,6 +322,7 @@ exports.updateShippingAddress = async (req, res) => {
       latitude,
       longitude,
       isActive,
+      addressLine2,
     } = req.body;
 
     console.log("landmark-->>", landmark);
@@ -340,8 +348,7 @@ exports.updateShippingAddress = async (req, res) => {
       ...user.shippingAddresses[addressIndex],
       name,
       phone,
-      addressDescription,
-      address: addressLine1,
+      addressLine2,
       landmark,
       city,
       state,

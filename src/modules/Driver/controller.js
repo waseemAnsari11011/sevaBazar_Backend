@@ -38,17 +38,23 @@ const enrichItemsAndTotal = (orderData, isChatOrder) => {
 
     // Calculate total bill for the driver (specific to their pickup)
     let totalAmount = 0;
+    let shippingFee = 0;
+    let deliveryCharge = 0;
+
     if (isChatOrder) {
         totalAmount = orderData.totalAmount || 0;
+        shippingFee = orderData.shippingFee || 0;
     } else {
         const vendorPart = orderData.vendors?.[0];
         if (vendorPart) {
             totalAmount = (vendorPart.products || []).reduce((sum, p) => sum + (p.totalAmount || (p.price * p.quantity)), 0);
-            totalAmount += (vendorPart.deliveryCharge || 0);
+            deliveryCharge = (vendorPart.deliveryCharge || 0);
+            shippingFee = (orderData.shippingFee || 0);
+            totalAmount += deliveryCharge + shippingFee;
         }
     }
 
-    return { items, totalAmount };
+    return { items, totalAmount, shippingFee, deliveryCharge };
 };
 
 const secret = process.env.JWT_SECRET;
@@ -365,6 +371,10 @@ exports.findNearestDrivers = async (req, res) => {
 
             if (orderData) {
                 const firstVendor = isChatOrder ? orderData.vendor : orderData.vendors[0]?.vendor;
+                // Extract fee info safely
+                const shippingFee = orderData.shippingFee || 0;
+                const deliveryCharge = isChatOrder ? 0 : (orderData.vendors?.[0]?.deliveryCharge || 0);
+
                 fullOfferData = {
                     ...fullOfferData,
                     pickupLocation: firstVendor?.location?.coordinates ? {
@@ -383,7 +393,10 @@ exports.findNearestDrivers = async (req, res) => {
                     shippingAddress: orderData.shippingAddress,
                     customerName: orderData.shippingAddress?.name || orderData.customer?.name || orderData.name,
                     customerPhone: orderData.shippingAddress?.phone || orderData.customer?.contactNumber,
-                    ...enrichItemsAndTotal(orderData, isChatOrder)
+                    ...enrichItemsAndTotal(orderData, isChatOrder),
+                    shippingFee,
+                    deliveryCharge,
+                    createdAt: orderData.createdAt
                 };
             }
 
@@ -812,6 +825,9 @@ exports.completeDelivery = async (req, res) => {
             });
         }
 
+        // Set deliveredAt timestamp for 12-hour payment deadline tracking
+        order.deliveredAt = currentTime;
+
         await order.save();
 
         // Send push notification to customer
@@ -837,6 +853,41 @@ exports.completeDelivery = async (req, res) => {
 
         driver.currentOrderId = null;
         driver.walletBalance = (driver.walletBalance || 0) + deliveryFee;
+
+        // ===== Update Floating Cash for COD Orders =====
+        if (order.paymentStatus !== 'Paid') {
+            // Calculate total order amount
+            let calculatedTotal = 0;
+
+            if (isChatOrder) {
+                // For chat orders, sum up all items
+                order.items.forEach(item => {
+                    calculatedTotal += item.totalAmount || (item.price * item.quantity);
+                });
+                calculatedTotal += (order.deliveryCharge || 0);
+            } else {
+                // For regular orders, sum up all vendor products
+                order.vendors.forEach(vendor => {
+                    vendor.products.forEach(product => {
+                        calculatedTotal += product.totalAmount || (product.price * product.quantity);
+                    });
+                    calculatedTotal += (vendor.deliveryCharge || 0);
+                });
+                calculatedTotal += (order.shippingFee || 0);
+            }
+
+            // Add to driver's floating cash
+            driver.floatingCash = (driver.floatingCash || 0) + calculatedTotal;
+
+            // Update order tracking
+            order.floatingCashAmount = calculatedTotal;
+            order.floatingCashStatus = 'Pending';
+            await order.save();
+
+            console.log(`Updated Driver ${driverId} floating cash: +₹${calculatedTotal}`);
+        }
+        // ===== END: Floating Cash Update =====
+
         await driver.save();
 
         console.log(`Order ${orderId} delivered by driver ${driverId}. Earned: ₹${deliveryFee}`);
@@ -870,9 +921,78 @@ exports.getWalletBalance = async (req, res) => {
             });
         }
 
+        // ===== 12:00 AM IST Deadline Logic =====
+        const Order = require('../Order/model');
+
+        // Calculate Start of Today in IST (India Standard Time: UTC+5:30)
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 mins in ms
+        const istNow = new Date(now.getTime() + istOffset);
+        const startOfTodayIST = new Date(istNow);
+        startOfTodayIST.setUTCHours(0, 0, 0, 0); // Midnight in IST
+
+        // Convert IST Midnight back to UTC for DB comparison
+        const deadlineUTC = new Date(startOfTodayIST.getTime() - istOffset);
+
+        // Find any order from previous days that is still 'Pending'
+        const overdueOrders = await Order.find({
+            driverId: driverId,
+            floatingCashStatus: 'Pending',
+            deliveredAt: { $ne: null, $lt: deadlineUTC }
+        });
+
+        // Calculate real-time Floating Cash sum (to reflect manual DB changes)
+        const allPendingCashOrders = await Order.find({
+            driverId: driverId,
+            floatingCashStatus: 'Pending'
+        });
+
+        const totalFloatingCash = allPendingCashOrders.reduce((sum, order) => {
+            if (order.floatingCashAmount !== null && order.floatingCashAmount !== undefined) {
+                return sum + order.floatingCashAmount;
+            }
+
+            // Fallback: Recalculate same as in completeDelivery
+            let orderTotal = 0;
+            const items = order.items || [];
+            const vendors = order.vendors || [];
+
+            if (items.length > 0 && !vendors.length) { // Simple check for chat/item-based orders
+                items.forEach(item => {
+                    orderTotal += item.totalAmount || (item.price * item.quantity);
+                });
+                orderTotal += (order.deliveryCharge || 0);
+            } else {
+                vendors.forEach(vendor => {
+                    const products = vendor.products || [];
+                    products.forEach(product => {
+                        orderTotal += product.totalAmount || (product.price * product.quantity);
+                    });
+                    orderTotal += (vendor.deliveryCharge || 0);
+                });
+                orderTotal += (order.shippingFee || 0);
+            }
+            return sum + orderTotal;
+        }, 0);
+
+        // Calculate real-time Pending Earnings (Available Balance)
+        const allPendingEarningOrders = await Order.find({
+            driverId: driverId,
+            driverEarningStatus: 'Pending'
+        });
+
+        const totalPendingEarnings = allPendingEarningOrders.reduce((sum, order) => {
+            return sum + (order.driverDeliveryFee?.totalFee || 0);
+        }, 0);
+
         res.status(200).json({
             success: true,
-            balance: driver.walletBalance || 0
+            balance: totalPendingEarnings, // Use calculated sum instead of static field
+            floatingCash: totalFloatingCash, // Use calculated sum instead of static field
+            floatingCashLimit: driver.floatingCashLimit || 2000,
+            isOnline: driver.isOnline || false,
+            isPaymentOverdue: overdueOrders.length > 0,
+            overdueCount: overdueOrders.length
         });
 
     } catch (error) {
@@ -901,11 +1021,11 @@ exports.getActiveOrder = async (req, res) => {
         }
 
         // Try to find the order in both collections
-        let order = await Order.findById(driver.currentOrderId);
+        let order = await Order.findById(driver.currentOrderId).populate('customer');
         let isChatOrder = false;
 
         if (!order) {
-            order = await ChatOrder.findById(driver.currentOrderId);
+            order = await ChatOrder.findById(driver.currentOrderId).populate('customer');
             if (order) isChatOrder = true;
         }
 
@@ -922,6 +1042,7 @@ exports.getActiveOrder = async (req, res) => {
                 earning: order.driverDeliveryFee?.totalFee || 0,
                 status: order.orderStatus,
                 isChatOrder: true,
+                createdAt: order.createdAt,
                 rawOfferData: {
                     orderId: order.orderId,
                     pickupLocation: vendor?.location?.coordinates ? {
@@ -937,8 +1058,8 @@ exports.getActiveOrder = async (req, res) => {
                         longitude: order.shippingAddress.longitude
                     },
                     shippingAddress: order.shippingAddress,
-                    customerName: order.shippingAddress?.name || order.customer?.name || order.name,
-                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber,
+                    customerName: order.customer?.name || order.shippingAddress?.name || order.name || 'Customer',
+                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber || 'N/A',
                     ...enrichItemsAndTotal(order, true)
                 }
             };
@@ -951,6 +1072,7 @@ exports.getActiveOrder = async (req, res) => {
                 earning: order.driverDeliveryFee?.totalFee || 0,
                 status: status,
                 isChatOrder: false,
+                createdAt: order.createdAt,
                 rawOfferData: {
                     orderId: order.orderId,
                     pickupLocation: vendor ? {
@@ -966,8 +1088,8 @@ exports.getActiveOrder = async (req, res) => {
                         longitude: order.shippingAddress.longitude
                     },
                     shippingAddress: order.shippingAddress,
-                    customerName: order.shippingAddress?.name || order.customer?.name || order.name,
-                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber,
+                    customerName: order.customer?.name || order.shippingAddress?.name || order.name || 'Customer',
+                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber || 'N/A',
                     ...enrichItemsAndTotal(order, false)
                 }
             };
@@ -1001,7 +1123,7 @@ exports.getDriverOrders = async (req, res) => {
         const activeOrders = await Order.find({
             driverId: driverId,
             'vendors.orderStatus': { $in: ['Processing', 'Shipped'] }
-        }).sort({ createdAt: -1 });
+        }).populate('customer').sort({ createdAt: -1 }).lean();
 
         const mappedActive = await Promise.all(activeOrders.map(async (order) => {
             const status = order.vendors[0]?.orderStatus;
@@ -1014,6 +1136,8 @@ exports.getDriverOrders = async (req, res) => {
                 status: status,
                 isOffer: false,
                 isChatOrder: false,
+                createdAt: order.createdAt,
+                _debug: console.log(`[DEBUG] Order ${order.orderId} - Shipping: ${order.shippingFee}, Delivery: ${order.vendors?.[0]?.deliveryCharge}`),
                 rawOfferData: {
                     orderId: order.orderId,
                     pickupLocation: vendor ? {
@@ -1029,8 +1153,10 @@ exports.getDriverOrders = async (req, res) => {
                         longitude: order.shippingAddress.longitude
                     },
                     shippingAddress: order.shippingAddress,
-                    customerName: order.shippingAddress?.name || order.customer?.name || order.name,
-                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber,
+                    customerName: order.customer?.name || order.shippingAddress?.name || order.name || 'Customer',
+                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber || 'N/A',
+                    shippingFee: order.shippingFee || 0,
+                    deliveryCharge: order.vendors?.[0]?.deliveryCharge || 0,
                     ...enrichItemsAndTotal(order, false)
                 }
             };
@@ -1040,7 +1166,7 @@ exports.getDriverOrders = async (req, res) => {
         const activeChatOrders = await ChatOrder.find({
             driverId: driverId,
             orderStatus: { $in: ['Processing', 'Shipped'] }
-        }).sort({ createdAt: -1 });
+        }).populate('customer').sort({ createdAt: -1 }).lean();
 
         const mappedActiveChat = await Promise.all(activeChatOrders.map(async (order) => {
             const vendor = await Vendor.findById(order.vendor);
@@ -1052,6 +1178,7 @@ exports.getDriverOrders = async (req, res) => {
                 status: order.orderStatus,
                 isOffer: false,
                 isChatOrder: true,
+                createdAt: order.createdAt,
                 rawOfferData: {
                     orderId: order.orderId,
                     pickupLocation: vendor ? {
@@ -1067,8 +1194,10 @@ exports.getDriverOrders = async (req, res) => {
                         longitude: order.shippingAddress.longitude
                     },
                     shippingAddress: order.shippingAddress,
-                    customerName: order.shippingAddress?.name || order.customer?.name || order.name,
-                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber,
+                    customerName: order.customer?.name || order.shippingAddress?.name || order.name || 'Customer',
+                    customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber || 'N/A',
+                    shippingFee: order.shippingFee || 0,
+                    deliveryCharge: 0, // Chat orders typically don't have separate delivery charge in this context
                     ...enrichItemsAndTotal(order, true)
                 }
             };
@@ -1082,12 +1211,12 @@ exports.getDriverOrders = async (req, res) => {
 
         const mappedOffers = await Promise.all(pendingOffers.map(async (offer) => {
             // Try regular Order
-            let order = await Order.findById(offer.orderId);
+            let order = await Order.findById(offer.orderId).lean();
             let isChat = false;
 
             if (!order) {
                 // Try ChatOrder
-                order = await ChatOrder.findById(offer.orderId);
+                order = await ChatOrder.findById(offer.orderId).lean();
                 if (order) isChat = true;
             }
 
@@ -1109,7 +1238,9 @@ exports.getDriverOrders = async (req, res) => {
                 earning: offer.earning || 0,
                 status: 'Offer',
                 isOffer: true,
+                isOffer: true,
                 isChatOrder: isChat,
+                createdAt: order.createdAt,
                 rawOfferData: {
                     orderId: order.orderId,
                     pickupLocation: vendor ? {
@@ -1127,6 +1258,8 @@ exports.getDriverOrders = async (req, res) => {
                     shippingAddress: order.shippingAddress,
                     customerName: order.shippingAddress?.name || order.customer?.name || order.name,
                     customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber,
+                    shippingFee: order.shippingFee || 0,
+                    deliveryCharge: isChat ? 0 : (order.vendors?.[0]?.deliveryCharge || 0),
                     ...enrichItemsAndTotal(order, isChat)
                 }
             };

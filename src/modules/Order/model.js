@@ -140,6 +140,29 @@ const orderSchema = new Schema({
     totalFee: Number,
     calculatedAt: Date,
   },
+  vendorPaymentStatus: {
+    type: String,
+    enum: ["Pending", "Paid"],
+    default: "Pending",
+  },
+  driverEarningStatus: {
+    type: String,
+    enum: ["Pending", "Paid"],
+    default: "Pending",
+  },
+  floatingCashStatus: {
+    type: String,
+    enum: ["Pending", "Paid"],
+    default: "Pending",
+  },
+  floatingCashAmount: {
+    type: Number,
+    default: 0,
+  },
+  deliveredAt: {
+    type: Date,
+    default: null,
+  },
 });
 
 // Pre-save middleware to generate a unique 6-digit orderId and calculate the total amount for each product

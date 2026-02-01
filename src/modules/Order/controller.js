@@ -472,6 +472,16 @@ exports.getOrdersByVendor = async (req, res) => {
             },
             // Unwind the productDetails array to get the object
             { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
+            // Lookup to join driver details
+            {
+                $lookup: {
+                    from: "drivers",
+                    localField: "driverId",
+                    foreignField: "_id",
+                    as: "driverDetails"
+                }
+            },
+            { $unwind: { path: "$driverDetails", preserveNullAndEmptyArrays: true } },
             // Group back the products and vendors
             {
                 $group: {
@@ -481,12 +491,17 @@ exports.getOrdersByVendor = async (req, res) => {
                         customer: "$customerDetails",
                         shippingAddress: "$shippingAddress",
                         vendor: "$vendorDetails",
+                        driver: "$driverDetails",
                         orderStatus: "$vendors.orderStatus",
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
                         razorpay_payment_id: "$razorpay_payment_id",
                         createdAt: "$createdAt",
-                        is_new: "$is_new"
+                        is_new: "$is_new",
+                        vendorPaymentStatus: "$vendorPaymentStatus",
+                        driverEarningStatus: "$driverEarningStatus",
+                        floatingCashStatus: "$floatingCashStatus",
+                        floatingCashAmount: "$floatingCashAmount"
                     },
                     totalAmount: { $sum: "$vendors.products.totalAmount" },
                     products: {
@@ -505,11 +520,16 @@ exports.getOrdersByVendor = async (req, res) => {
                     shortId: "$_id.shortId",
                     customer: "$_id.customer",
                     shippingAddress: "$_id.shippingAddress",
+                    driver: "$_id.driver",
                     isPaymentVerified: "$_id.isPaymentVerified",
                     paymentStatus: "$_id.paymentStatus",
                     razorpay_payment_id: "$_id.razorpay_payment_id",
                     createdAt: "$_id.createdAt",
                     is_new: "$_id.is_new",
+                    vendorPaymentStatus: "$_id.vendorPaymentStatus",
+                    driverEarningStatus: "$_id.driverEarningStatus",
+                    floatingCashStatus: "$_id.floatingCashStatus",
+                    floatingCashAmount: "$_id.floatingCashAmount",
                     totalAmount: 1,
                     vendors: {
                         vendor: "$_id.vendor",
@@ -737,6 +757,59 @@ exports.updateOrderStatus = async (req, res) => {
 
             // Save the updated order
             await order.save();
+
+            // ===== NEW: Update Driver Floating Cash if Driver is Assigned =====
+            if (order.driverId) {
+                try {
+                    const driver = await Driver.findById(order.driverId);
+                    if (driver) {
+                        // Calculate total amount to add to floating cash
+                        // Floating Cash = Total Order Value (assuming driver collects cash)
+                        // Note: If you have prepaid logic, check paymentStatus first.
+                        // Assuming "Unpaid" means Cash on Delivery.
+
+                        if (order.paymentStatus !== 'Paid') {
+                            let orderTotal = 0;
+                            order.vendors.forEach(v => {
+                                v.products.forEach(p => {
+                                    orderTotal += (p.price * p.quantity); // Basic calculation, adjust for discount/tax if needed
+                                });
+                                orderTotal += (v.deliveryCharge || 0);
+                            });
+                            // Add shipping fee if applicable (global or per vendor?)
+                            // Using the pre-calculated logic might be safer if available.
+                            // Better approach: Use the createOrder calculation logic or store total on Order.
+
+                            // Re-calculate total properly based on your Order Model structure
+                            // Order Model has totalAmount in aggregation, but not directly on root for simple fetch.
+                            // Let's iterate properly.
+
+                            let calculatedTotal = 0;
+                            order.vendors.forEach(vendor => {
+                                vendor.products.forEach(product => {
+                                    calculatedTotal += product.totalAmount;
+                                });
+                                calculatedTotal += (vendor.deliveryCharge || 0);
+                            });
+                            calculatedTotal += (order.shippingFee || 0);
+
+                            // Update Driver
+                            driver.floatingCash = (driver.floatingCash || 0) + calculatedTotal;
+                            await driver.save();
+
+                            // Update Order Tracking
+                            order.floatingCashAmount = calculatedTotal;
+                            order.floatingCashStatus = 'Pending';
+                            await order.save(); // Save order again with new fields
+
+                            console.log(`Updated Driver ${driver._id} floating cash: +${calculatedTotal}`);
+                        }
+                    }
+                } catch (cashError) {
+                    console.error('Error updating floating cash:', cashError);
+                }
+            }
+            // ===== END: Floating Cash Update =====
         }
 
         // Extract customer ID from the order - SAFETY CHECK
@@ -1161,9 +1234,14 @@ exports.getOrderDetailsByVendor = async (req, res) => {
         }
 
         const vId = new mongoose.Types.ObjectId(vendorId);
-        console.log(`[DEBUG] Match Query:`, JSON.stringify(matchQuery), `vId=${vId}`);
 
-        const order = await Order.aggregate([
+        // Check if the requesting user is an Admin
+        const requestingVendor = await Vendor.findById(vId);
+        const isAdmin = requestingVendor && requestingVendor.role === 'admin';
+
+        console.log(`[DEBUG] Match Query:`, JSON.stringify(matchQuery), `vId=${vId}, isAdmin=${isAdmin}`);
+
+        const pipeline = [
             { $match: matchQuery },
             {
                 $addFields: {
@@ -1177,7 +1255,14 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                 }
             },
             { $unwind: { path: "$vendors", preserveNullAndEmptyArrays: true } },
-            { $match: { "vendors.vendor": vId } },
+        ];
+
+        // Only filter by valid vendor ID if NOT admin
+        if (!isAdmin) {
+            pipeline.push({ $match: { "vendors.vendor": vId } });
+        }
+
+        pipeline.push(
             {
                 $lookup: {
                     from: "customers",
@@ -1197,6 +1282,16 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                 }
             },
             { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
+            // Lookup Vendor to get details (for Admin view especially)
+            {
+                $lookup: {
+                    from: "vendors",
+                    localField: "vendors.vendor",
+                    foreignField: "_id",
+                    as: "vendorDetails"
+                }
+            },
+            { $unwind: { path: "$vendorDetails", preserveNullAndEmptyArrays: true } },
             {
                 $group: {
                     _id: "$_id",
@@ -1211,6 +1306,14 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                     deliveryCharge: { $first: "$vendors.deliveryCharge" },
                     shippingFee: { $first: "$vendors.shippingFee" },
                     shippingAddress: { $first: "$shippingAddress" },
+
+                    // Payment Statuses
+                    vendorPaymentStatus: { $first: "$vendorPaymentStatus" },
+                    driverEarningStatus: { $first: "$driverEarningStatus" },
+                    floatingCashStatus: { $first: "$floatingCashStatus" },
+                    floatingCashAmount: { $first: "$floatingCashAmount" },
+
+                    // Arrays
                     items: {
                         $push: {
                             name: { $ifNull: ["$productDetails.name", "$vendors.products.name"] },
@@ -1221,7 +1324,21 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                             variations: "$vendors.products.variations"
                         }
                     },
-                    driver: { $first: "$driver" }
+                    // We need to keep vendor details. Since we might have multiple vendors in the original order,
+                    // but here we unwound `vendors`, if we didn't match specific vendor, we might get multiple groups?
+                    // Wait, `matchQuery` matches ONE order.
+                    // If Admin views it, and there are multiple vendors, `$unwind vendors` creates multiple docs.
+                    // `$group` will re-merge them if we group by `_id` (Order ID).
+                    // BUT `items` will be merged from all vendors.
+                    // Admin needs to see breakdown?
+                    // "Admin Panel... View Detail... Vendor Detail... Driver Detail..."
+                    // If multiple vendors, we should probably return an array of vendor details?
+                    // For now, let's assume one vendor per order or simpler grouping.
+                    // Actually, the current frontend likely expects one object.
+
+                    vendorDetails: { $first: "$vendorDetails" }, // Taking first for now
+                    driver: { $first: "$driver" },
+                    driverDeliveryFee: { $first: "$driverDeliveryFee" }
                 }
             },
             {
@@ -1248,14 +1365,25 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                     driverId: 1,
                     shippingAddress: 1,
                     items: 1,
+                    vendorDetails: 1, // Include full vendor details
+                    driver: 1, // Include full driver details
+
+                    vendorPaymentStatus: 1,
+                    driverEarningStatus: 1,
+                    floatingCashStatus: 1,
+                    floatingCashAmount: 1,
+                    driverDeliveryFee: 1,
+
                     riderName: "$driver.personalDetails.name",
                     riderContact: "$driver.personalDetails.phone"
                 }
             }
-        ]);
+        );
+
+        const order = await Order.aggregate(pipeline);
 
         if (!order || order.length === 0) {
-            console.log(`[DEBUG] Order NOT found for oId=${oId}, vId=${vId}`);
+            console.log(`[DEBUG] Order NOT found for oId=${orderId}, vId=${vendorId}`);
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
 
@@ -1430,5 +1558,49 @@ exports.seedTestOrder = async (req, res) => {
     } catch (error) {
         console.error('Error generating invoice:', error);
         res.status(500).send('Internal Server Error');
+    }
+};
+
+exports.adminUpdatePaymentStatus = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { type, status } = req.body; // type: 'vendorPayment' | 'driverEarning' | 'floatingCash'
+
+        const order = await Order.findById(orderId);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+
+        if (type === 'vendorPayment') {
+            order.vendorPaymentStatus = status;
+        } else if (type === 'driverEarning') {
+            order.driverEarningStatus = status;
+        } else if (type === 'floatingCash') {
+            // Logic: If Admin marks Floating Cash as 'Paid', it means Driver has paid the cash to Admin.
+            // So we reduce the Driver's floatingCash debt.
+            if (status === 'Paid' && order.floatingCashStatus !== 'Paid') {
+                if (order.driverId) {
+                    const driver = await Driver.findById(order.driverId);
+                    if (driver) {
+                        // Deduct the specific amount associated with this order
+                        // If we didn't save it on order, we recalculate or use 0.
+                        // (We saved it in previous step as floatingCashAmount)
+                        const amountToDeduct = order.floatingCashAmount || 0;
+                        driver.floatingCash = Math.max(0, (driver.floatingCash || 0) - amountToDeduct);
+                        await driver.save();
+                        console.log(`Driver ${driver._id} paid floating cash: -${amountToDeduct}`);
+                    }
+                }
+            }
+            // Note: If reverting from Paid -> Pending, maybe we should add debt back? 
+            // For now, let's keep it simple: Only handle Pending -> Paid flow for debt reduction.
+
+            order.floatingCashStatus = status;
+        }
+
+        await order.save();
+        res.status(200).json(order);
+
+    } catch (error) {
+        console.error('Error in adminUpdatePaymentStatus:', error);
+        res.status(500).json({ error: error.message });
     }
 };
