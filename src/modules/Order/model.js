@@ -67,6 +67,9 @@ const orderSchema = new Schema({
       distance: {
         type: Number,
       },
+      deliveryChargeDescription: {
+        type: String,
+      },
       shippingFee: {
         type: Number,
         default: 0,
@@ -136,6 +139,29 @@ const orderSchema = new Schema({
     extraPay: Number,
     totalFee: Number,
     calculatedAt: Date,
+  },
+  vendorPaymentStatus: {
+    type: String,
+    enum: ["Pending", "Paid"],
+    default: "Pending",
+  },
+  driverEarningStatus: {
+    type: String,
+    enum: ["Pending", "Paid"],
+    default: "Pending",
+  },
+  floatingCashStatus: {
+    type: String,
+    enum: ["Pending", "Paid"],
+    default: "Pending",
+  },
+  floatingCashAmount: {
+    type: Number,
+    default: 0,
+  },
+  deliveredAt: {
+    type: Date,
+    default: null,
   },
 });
 

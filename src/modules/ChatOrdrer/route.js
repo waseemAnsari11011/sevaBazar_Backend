@@ -1,6 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const {getChatOrder, updateChatOrder, markChatOrderViewed, getNewChatOrdersCountByVendor, updateChatPaymentStatusManually, createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, getChatOrdersHistoryByCustomer } = require('./controller'); // Adjust the path as necessary
+const {
+    getChatOrder,
+    updateChatOrder,
+    markChatOrderViewed,
+    getNewChatOrdersCountByVendor,
+    updateChatPaymentStatusManually,
+    createChatOrder,
+    getChatOrdersByCustomer,
+    updateChatOrderStatus,
+    getChatOrdersByVendor,
+    updateOrderAmountAndStatus,
+    getChatOrdersHistoryByCustomer,
+    getChatOrderInvoice
+} = require('./controller');
 
 // POST route to create a new ChatOrder
 router.post('/create-chat-order', createChatOrder);
@@ -8,14 +21,12 @@ router.post('/create-chat-order', createChatOrder);
 // PUT route to update an existing ChatOrder
 router.put('/chat/updateChatOrder', updateChatOrder);
 
-
 // GET route to fetch a single ChatOrder
 router.get('/chat-order/:orderId', getChatOrder);
 
 // GET route to fetch all ChatOrders of a particular customer
 router.get('/customer/:customerId/chat-orders', getChatOrdersByCustomer);
 router.get('/chat-orders-history/:customerId/', getChatOrdersHistoryByCustomer);
-
 
 router.put('/chat-order/status/:orderId/vendor/', updateChatOrderStatus);
 
@@ -27,5 +38,8 @@ router.post('/chat-verify-payment', updateChatPaymentStatusManually);
 
 router.get('/new-chat-order/vendor/:vendorId', getNewChatOrdersCountByVendor);
 router.get('/mark-viewed/chat-orders/:vendorId', markChatOrderViewed);
+
+// Invoice route
+router.get('/chat-order/invoice/:orderId', getChatOrderInvoice);
 
 module.exports = router;

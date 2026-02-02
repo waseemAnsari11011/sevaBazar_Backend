@@ -111,6 +111,15 @@ const vendorSchema = new Schema({
     enum: ["online", "offline"],
     default: "online",
   },
+  address: {
+    addressLine1: String,
+    addressLine2: String,
+    landmark: String,
+    city: String,
+    state: String,
+    country: String,
+    postalCode: String,
+  },
   location: {
     type: {
       type: String,

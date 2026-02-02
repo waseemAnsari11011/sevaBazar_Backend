@@ -44,6 +44,14 @@ const driverSchema = new Schema({
         type: Number,
         default: 0,
     },
+    floatingCash: {
+        type: Number,
+        default: 0,
+    },
+    floatingCashLimit: {
+        type: Number,
+        default: 2000,
+    },
     isOnline: {
         type: Boolean,
         default: false,

@@ -2,6 +2,7 @@ const ChatOrder = require('./model'); // Adjust the path as necessary
 const Customer = require('../Customer/model'); // Assuming you have a Customer model
 const Vendor = require('../Vendor/model'); // Assuming you have a Customer model
 const mongoose = require('mongoose');
+const Settings = require('../Settings/model');
 const emailService = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushNotificationUtil');
 
@@ -13,7 +14,7 @@ const createChatOrder = async (req, res) => {
     try {
         const { orderMessage, customer, name, shippingAddress, paymentStatus } = req.body;
         // Validate required fields
-        if (!orderMessage || !customer || !shippingAddress || !shippingAddress.address || !shippingAddress.city || !shippingAddress.state || !shippingAddress.country || !shippingAddress.postalCode) {
+        if (!orderMessage || !customer || !shippingAddress || !shippingAddress.address) {
             return res.status(400).json({ message: 'Missing required fields' });
         }
 
@@ -40,7 +41,9 @@ const createChatOrder = async (req, res) => {
             const settings = await Settings.findOne();
 
             // Use unified pricing logic ✅
-            deliveryCharge = calculateDeliveryFee(distance, settings);
+            const feeInfo = calculateDeliveryFee(distance, settings);
+            deliveryCharge = feeInfo.amount;
+            var deliveryChargeDescription = feeInfo.description;
         }
 
         const SHIPPING_FEE = 9;
@@ -56,6 +59,7 @@ const createChatOrder = async (req, res) => {
             vendor: req.body.vendorId, // Assign the vendor if provided
             is_new: true,
             deliveryCharge,
+            deliveryChargeDescription,
             distance,
             shippingFee: SHIPPING_FEE
         });
@@ -99,6 +103,8 @@ const updateChatOrder = async (req, res) => {
 
         // Update the products and calculate the total amount
         order.products = products;
+        order.orderStatus = 'Pending';
+        order.is_new = false;
         order.totalAmount = products.reduce((total, product) => {
             // Calculate the subtotal for each product considering discounts
             const subtotal = product.price * product.quantity * (1 - product.discount / 100);
@@ -144,7 +150,10 @@ const getChatOrder = async (req, res) => {
         const { orderId } = req.params;
 
         // Find the order by orderId
-        const order = await ChatOrder.findOne({ _id: orderId }).populate('customer').populate('vendor');
+        const order = await ChatOrder.findOne({ _id: orderId })
+            .populate('customer')
+            .populate('vendor')
+            .populate('driverId');
         if (!order) {
             return res.status(404).json({ message: 'Order not found' });
         }
@@ -521,4 +530,129 @@ const markChatOrderViewed = async (req, res) => {
         res.status(500).json({ message: 'An error occurred while marking orders as viewed', error: error.message });
     }
 };
-module.exports = { createChatOrder, getChatOrdersByCustomer, updateChatOrderStatus, getChatOrdersByVendor, updateOrderAmountAndStatus, updateChatPaymentStatusManually, getNewChatOrdersCountByVendor, markChatOrderViewed, updateChatOrder, getChatOrder, getChatOrdersHistoryByCustomer };
+const getChatOrderInvoice = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const order = await ChatOrder.findById(orderId)
+            .populate('customer')
+            .populate('vendor');
+
+        if (!order) {
+            return res.status(404).send('Order not found');
+        }
+
+        const totalAmount = parseFloat(order.totalAmount || 0);
+        const deliveryCharge = parseFloat(order.deliveryCharge || 0);
+        const grandTotal = totalAmount + deliveryCharge;
+
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Invoice #${order.shortId}</title>
+    <style>
+        body { font-family: 'Helvetica Neue', 'Helvetica', Helvetica, Arial, sans-serif; color: #555; }
+        .invoice-box { max-width: 800px; margin: auto; padding: 30px; border: 1px solid #eee; box-shadow: 0 0 10px rgba(0, 0, 0, .15); font-size: 16px; line-height: 24px; color: #555; }
+        .invoice-box table { width: 100%; line-height: inherit; text-align: left; border-collapse: collapse; }
+        .invoice-box table td { padding: 5px; vertical-align: top; }
+        .invoice-box table tr td:nth-child(2) { text-align: right; }
+        .invoice-box table tr.top table td { padding-bottom: 20px; }
+        .invoice-box table tr.top table td.title { font-size: 45px; line-height: 45px; color: #333; }
+        .invoice-box table tr.information table td { padding-bottom: 40px; }
+        .invoice-box table tr.heading td { background: #eee; border-bottom: 1px solid #ddd; font-weight: bold; }
+        .invoice-box table tr.details td { padding-bottom: 20px; }
+        .invoice-box table tr.item td { border-bottom: 1px solid #eee; }
+        .invoice-box table tr.item.last td { border-bottom: none; }
+        .invoice-box table tr.total td:nth-child(2) { border-top: 2px solid #eee; font-weight: bold; }
+        @media only screen and (max-width: 600px) {
+            .invoice-box table tr.top table td { width: 100%; display: block; text-align: center; }
+            .invoice-box table tr.information table td { width: 100%; display: block; text-align: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-box">
+        <table>
+            <tr class="top">
+                <td colspan="2">
+                    <table>
+                        <tr>
+                            <td class="title">SevaBazar</td>
+                            <td>
+                                Invoice #: ${order.shortId}<br>
+                                Created: ${new Date(order.createdAt).toLocaleDateString()}<br>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+            <tr class="information">
+                <td colspan="2">
+                    <table>
+                        <tr>
+                            <td>
+                                <strong>Vendor:</strong><br>
+                                ${order.vendor?.name || 'N/A'}<br>
+                                ${order.vendor?.email || ''}
+                            </td>
+                            <td>
+                                <strong>Customer:</strong><br>
+                                ${order.customer?.name || order.name || 'N/A'}<br>
+                                ${order.customer?.contactNumber || ''}
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+            <tr class="heading">
+                <td>Item</td>
+                <td>Price</td>
+            </tr>
+            ${order.products.map(product => `
+            <tr class="item">
+                <td>${product.name} (x${product.quantity || 1})</td>
+                <td>₹${parseFloat(product.totalAmount || 0).toFixed(2)}</td>
+            </tr>
+            `).join('')}
+            <tr class="total">
+                <td></td>
+                <td>Subtotal: ₹${totalAmount.toFixed(2)}</td>
+            </tr>
+            <tr class="total">
+                <td></td>
+                <td>Delivery: ₹${deliveryCharge.toFixed(2)}</td>
+            </tr>
+            <tr class="total">
+                <td></td>
+                <td>Total: ₹${grandTotal.toFixed(2)}</td>
+            </tr>
+        </table>
+        <div style="margin-top: 50px; text-align: center; font-size: 12px; color: #999;">
+            Thank you for shopping with SevaBazar!
+        </div>
+    </div>
+</body>
+</html>`;
+        res.set('Content-Type', 'text/html');
+        res.send(html);
+    } catch (error) {
+        console.error('Error generating invoice:', error);
+        res.status(500).send('Internal Server Error');
+    }
+};
+
+module.exports = {
+    createChatOrder,
+    getChatOrdersByCustomer,
+    updateChatOrderStatus,
+    getChatOrdersByVendor,
+    updateOrderAmountAndStatus,
+    updateChatPaymentStatusManually,
+    getNewChatOrdersCountByVendor,
+    markChatOrderViewed,
+    updateChatOrder,
+    getChatOrder,
+    getChatOrdersHistoryByCustomer,
+    getChatOrderInvoice
+};

@@ -40,13 +40,13 @@ const orderSchema = new Schema({
         required: true,
     },
     name: { type: String },
-    shippingAddress: {type: mongoose.Schema.Types.Mixed},
+    shippingAddress: { type: mongoose.Schema.Types.Mixed },
     paymentStatus: {
         type: String,
         enum: ['Paid', 'Unpaid'],
         default: 'Unpaid'
     },
-    deliveredInMin:{
+    deliveredInMin: {
         type: Number,
     },
     orderStatus: {
@@ -61,6 +61,9 @@ const orderSchema = new Schema({
     deliveryCharge: {
         type: Number,
         default: 0
+    },
+    deliveryChargeDescription: {
+        type: String,
     },
     distance: {
         type: Number
@@ -91,6 +94,20 @@ const orderSchema = new Schema({
     isPaymentVerified: {
         type: Boolean,
         default: false
+    },
+    driverId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Driver',
+    },
+    pickupOtp: {
+        type: Number,
+    },
+    deliveryOtp: {
+        type: Number,
+    },
+    acceptedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Driver',
     },
 });
 
