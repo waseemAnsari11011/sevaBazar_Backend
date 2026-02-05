@@ -42,8 +42,10 @@ const enrichItemsAndTotal = (orderData, isChatOrder) => {
     let deliveryCharge = 0;
 
     if (isChatOrder) {
-        totalAmount = orderData.totalAmount || 0;
-        shippingFee = orderData.shippingFee || 0;
+        totalAmount = (orderData.totalAmount || 0);
+        shippingFee = (orderData.shippingFee || 0);
+        deliveryCharge = (orderData.deliveryCharge || 0);
+        totalAmount += shippingFee + deliveryCharge;
     } else {
         const vendorPart = orderData.vendors?.[0];
         if (vendorPart) {
@@ -54,7 +56,7 @@ const enrichItemsAndTotal = (orderData, isChatOrder) => {
         }
     }
 
-    return { items, totalAmount, shippingFee, deliveryCharge };
+    return { items, totalAmount: Number(totalAmount.toFixed(2)), shippingFee, deliveryCharge };
 };
 
 const secret = process.env.JWT_SECRET;
@@ -730,9 +732,16 @@ exports.initiateDeliveryCompletion = async (req, res) => {
         }
 
         const Order = require('../Order/model');
+        const ChatOrder = require('../ChatOrdrer/model');
 
-        // Find order to check if it exists and is assigned to this driver
-        const order = await Order.findOne({ orderId: orderId, driverId: driverId });
+        // Try to find the order in both collections
+        let order = await Order.findOne({ orderId: orderId, driverId: driverId });
+        let isChatOrder = false;
+
+        if (!order) {
+            order = await ChatOrder.findOne({ orderId: orderId, driverId: driverId });
+            if (order) isChatOrder = true;
+        }
 
         if (!order) {
             return res.status(404).json({
@@ -860,8 +869,8 @@ exports.completeDelivery = async (req, res) => {
             let calculatedTotal = 0;
 
             if (isChatOrder) {
-                // For chat orders, sum up all items
-                order.items.forEach(item => {
+                // For chat orders, sum up all products
+                order.products.forEach(item => {
                     calculatedTotal += item.totalAmount || (item.price * item.quantity);
                 });
                 calculatedTotal += (order.deliveryCharge || 0);
@@ -923,6 +932,7 @@ exports.getWalletBalance = async (req, res) => {
 
         // ===== 12:00 AM IST Deadline Logic =====
         const Order = require('../Order/model');
+        const ChatOrder = require('../ChatOrdrer/model');
 
         // Calculate Start of Today in IST (India Standard Time: UTC+5:30)
         const now = new Date();
@@ -935,34 +945,45 @@ exports.getWalletBalance = async (req, res) => {
         const deadlineUTC = new Date(startOfTodayIST.getTime() - istOffset);
 
         // Find any order from previous days that is still 'Pending'
-        const overdueOrders = await Order.find({
+        const overdueRegular = await Order.find({
             driverId: driverId,
             floatingCashStatus: 'Pending',
             deliveredAt: { $ne: null, $lt: deadlineUTC }
         });
-
-        // Calculate real-time Floating Cash sum (to reflect manual DB changes)
-        const allPendingCashOrders = await Order.find({
+        const overdueChat = await ChatOrder.find({
             driverId: driverId,
-            floatingCashStatus: 'Pending'
+            floatingCashStatus: 'Pending',
+            deliveredAt: { $ne: null, $lt: deadlineUTC }
+        });
+        const overdueOrdersCount = overdueRegular.length + overdueChat.length;
+
+        // Calculate real-time Floating Cash sum (Only for Delivered orders)
+        const pendingCashRegular = await Order.find({
+            driverId: driverId,
+            floatingCashStatus: 'Pending',
+            deliveredAt: { $ne: null }
+        });
+        const pendingCashChat = await ChatOrder.find({
+            driverId: driverId,
+            floatingCashStatus: 'Pending',
+            deliveredAt: { $ne: null }
         });
 
-        const totalFloatingCash = allPendingCashOrders.reduce((sum, order) => {
-            if (order.floatingCashAmount !== null && order.floatingCashAmount !== undefined) {
+        const calcFloatingCash = (orders, isChat) => orders.reduce((sum, order) => {
+            if (order.floatingCashAmount !== null && order.floatingCashAmount !== undefined && order.floatingCashAmount !== 0) {
                 return sum + order.floatingCashAmount;
             }
 
             // Fallback: Recalculate same as in completeDelivery
             let orderTotal = 0;
-            const items = order.items || [];
-            const vendors = order.vendors || [];
-
-            if (items.length > 0 && !vendors.length) { // Simple check for chat/item-based orders
-                items.forEach(item => {
+            if (isChat) {
+                const products = order.products || [];
+                products.forEach(item => {
                     orderTotal += item.totalAmount || (item.price * item.quantity);
                 });
                 orderTotal += (order.deliveryCharge || 0);
             } else {
+                const vendors = order.vendors || [];
                 vendors.forEach(vendor => {
                     const products = vendor.products || [];
                     products.forEach(product => {
@@ -975,15 +996,36 @@ exports.getWalletBalance = async (req, res) => {
             return sum + orderTotal;
         }, 0);
 
-        // Calculate real-time Pending Earnings (Available Balance)
-        const allPendingEarningOrders = await Order.find({
+        const totalFloatingCash = calcFloatingCash(pendingCashRegular, false) + calcFloatingCash(pendingCashChat, true);
+
+        // Calculate real-time Pending Earnings (Available Balance - Only for Delivered orders)
+        const pendingEarningsRegular = await Order.find({
             driverId: driverId,
-            driverEarningStatus: 'Pending'
+            driverEarningStatus: 'Pending',
+            deliveredAt: { $ne: null }
+        });
+        const pendingEarningsChat = await ChatOrder.find({
+            driverId: driverId,
+            driverEarningStatus: 'Pending',
+            deliveredAt: { $ne: null }
         });
 
-        const totalPendingEarnings = allPendingEarningOrders.reduce((sum, order) => {
-            return sum + (order.driverDeliveryFee?.totalFee || 0);
+        // Use settings for fallback if needed
+        const Settings = require('../Settings/model');
+        let settings = await Settings.findOne();
+        if (!settings) settings = { driverDeliveryFee: { basePay: 30, baseDistance: 5, perKmRate: 10 } };
+        const { calculateDeliveryFee } = require('./pricingUtil');
+
+        const calcEarnings = (orders) => orders.reduce((sum, order) => {
+            let earning = order.driverDeliveryFee?.totalFee;
+            if (earning === undefined || earning === null || earning === 0) {
+                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
+                earning = feeInfo.amount || 0;
+            }
+            return sum + earning;
         }, 0);
+
+        const totalPendingEarnings = calcEarnings(pendingEarningsRegular) + calcEarnings(pendingEarningsChat);
 
         res.status(200).json({
             success: true,
@@ -991,8 +1033,8 @@ exports.getWalletBalance = async (req, res) => {
             floatingCash: totalFloatingCash, // Use calculated sum instead of static field
             floatingCashLimit: driver.floatingCashLimit || 2000,
             isOnline: driver.isOnline || false,
-            isPaymentOverdue: overdueOrders.length > 0,
-            overdueCount: overdueOrders.length
+            isPaymentOverdue: overdueOrdersCount > 0,
+            overdueCount: overdueOrdersCount
         });
 
     } catch (error) {
@@ -1036,10 +1078,29 @@ exports.getActiveOrder = async (req, res) => {
         let reconstructedOrder = {};
         if (isChatOrder) {
             const vendor = await Vendor.findById(order.vendor);
+            const Settings = require('../Settings/model');
+            let settings = await Settings.findOne();
+            if (!settings) settings = { driverDeliveryFee: { basePay: 30, baseDistance: 5, perKmRate: 10 } };
+
+            const { calculateDeliveryFee } = require('./pricingUtil');
+
+            // Fallbacks for missing driverDeliveryFee
+            let totalDistance = order.driverDeliveryFee?.totalDistance;
+            let earning = order.driverDeliveryFee?.totalFee;
+
+            if (totalDistance === undefined || totalDistance === null || totalDistance === 0) {
+                totalDistance = order.distance || 0;
+            }
+
+            if (earning === undefined || earning === null || earning === 0) {
+                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
+                earning = feeInfo.amount || 0;
+            }
+
             reconstructedOrder = {
                 orderId: order.orderId,
-                totalDistance: order.driverDeliveryFee?.totalDistance || 0,
-                earning: order.driverDeliveryFee?.totalFee || 0,
+                totalDistance: totalDistance,
+                earning: earning,
                 status: order.orderStatus,
                 isChatOrder: true,
                 createdAt: order.createdAt,
@@ -1066,10 +1127,29 @@ exports.getActiveOrder = async (req, res) => {
         } else {
             const status = order.vendors[0]?.orderStatus;
             const vendor = await Vendor.findById(order.vendors[0].vendor);
+            const Settings = require('../Settings/model');
+            let settings = await Settings.findOne();
+            if (!settings) settings = { driverDeliveryFee: { basePay: 30, baseDistance: 5, perKmRate: 10 } };
+
+            const { calculateDeliveryFee } = require('./pricingUtil');
+
+            // Fallbacks for missing driverDeliveryFee
+            let totalDistance = order.driverDeliveryFee?.totalDistance;
+            let earning = order.driverDeliveryFee?.totalFee;
+
+            if (totalDistance === undefined || totalDistance === null || totalDistance === 0) {
+                totalDistance = order.distance || 0;
+            }
+
+            if (earning === undefined || earning === null || earning === 0) {
+                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
+                earning = feeInfo.amount || 0;
+            }
+
             reconstructedOrder = {
                 orderId: order.orderId,
-                totalDistance: order.driverDeliveryFee?.totalDistance || 0,
-                earning: order.driverDeliveryFee?.totalFee || 0,
+                totalDistance: totalDistance,
+                earning: earning,
                 status: status,
                 isChatOrder: false,
                 createdAt: order.createdAt,
@@ -1127,12 +1207,35 @@ exports.getDriverOrders = async (req, res) => {
 
         const mappedActive = await Promise.all(activeOrders.map(async (order) => {
             const status = order.vendors[0]?.orderStatus;
-            const vendor = await Vendor.findById(order.vendors[0].vendor);
+            const vendorId = order.vendors[0]?.vendor;
+            const vendor = await Vendor.findById(vendorId);
+
+            const Settings = require('../Settings/model');
+            let settings = await Settings.findOne();
+            if (!settings) settings = { driverDeliveryFee: { basePay: 30, baseDistance: 5, perKmRate: 10 } };
+
+            const { calculateDeliveryFee } = require('./pricingUtil');
+
+            // Fallbacks for missing driverDeliveryFee
+            let totalDistance = order.driverDeliveryFee?.totalDistance;
+            let earning = order.driverDeliveryFee?.totalFee;
+
+            if (totalDistance === undefined || totalDistance === null || totalDistance === 0) {
+                // For regular orders, distance is typically vendor to customer
+                // Total distance would ideally be driver -> vendor -> customer, but here we fallback to vendor -> customer
+                const shippingDist = order.vendors?.[0]?.deliveryCharge === 0 ? 0 : (order.shippingFee > 0 ? 5 : 0); // rough estimate if missing
+                totalDistance = order.distance || 0;
+            }
+
+            if (earning === undefined || earning === null || earning === 0) {
+                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
+                earning = feeInfo.amount || 0;
+            }
 
             return {
                 orderId: order.orderId,
-                totalDistance: order.driverDeliveryFee?.totalDistance || 0,
-                earning: order.driverDeliveryFee?.totalFee || 0,
+                totalDistance: totalDistance,
+                earning: earning,
                 status: status,
                 isOffer: false,
                 isChatOrder: false,
@@ -1170,11 +1273,30 @@ exports.getDriverOrders = async (req, res) => {
 
         const mappedActiveChat = await Promise.all(activeChatOrders.map(async (order) => {
             const vendor = await Vendor.findById(order.vendor);
+            const Settings = require('../Settings/model');
+            let settings = await Settings.findOne();
+            if (!settings) settings = { driverDeliveryFee: { basePay: 30, baseDistance: 5, perKmRate: 10 } };
+
+            const { calculateDeliveryFee } = require('./pricingUtil');
+
+            // Fallbacks for missing driverDeliveryFee (common for older chat orders)
+            let totalDistance = order.driverDeliveryFee?.totalDistance;
+            let earning = order.driverDeliveryFee?.totalFee;
+
+            if (totalDistance === undefined || totalDistance === null || totalDistance === 0) {
+                totalDistance = order.distance || 0;
+            }
+
+            if (earning === undefined || earning === null || earning === 0) {
+                // If fee is missing, calculate a proxy based on pickup-to-drop distance
+                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
+                earning = feeInfo.amount || 0;
+            }
 
             return {
                 orderId: order.orderId,
-                totalDistance: order.driverDeliveryFee?.totalDistance || 0,
-                earning: order.driverDeliveryFee?.totalFee || 0,
+                totalDistance: totalDistance,
+                earning: earning,
                 status: order.orderStatus,
                 isOffer: false,
                 isChatOrder: true,
@@ -1197,7 +1319,7 @@ exports.getDriverOrders = async (req, res) => {
                     customerName: order.customer?.name || order.shippingAddress?.name || order.name || 'Customer',
                     customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber || 'N/A',
                     shippingFee: order.shippingFee || 0,
-                    deliveryCharge: 0, // Chat orders typically don't have separate delivery charge in this context
+                    deliveryCharge: order.deliveryCharge || 0,
                     ...enrichItemsAndTotal(order, true)
                 }
             };
@@ -1238,7 +1360,6 @@ exports.getDriverOrders = async (req, res) => {
                 earning: offer.earning || 0,
                 status: 'Offer',
                 isOffer: true,
-                isOffer: true,
                 isChatOrder: isChat,
                 createdAt: order.createdAt,
                 rawOfferData: {
@@ -1259,7 +1380,7 @@ exports.getDriverOrders = async (req, res) => {
                     customerName: order.shippingAddress?.name || order.customer?.name || order.name,
                     customerPhone: order.shippingAddress?.phone || order.customer?.contactNumber,
                     shippingFee: order.shippingFee || 0,
-                    deliveryCharge: isChat ? 0 : (order.vendors?.[0]?.deliveryCharge || 0),
+                    deliveryCharge: isChat ? (order.deliveryCharge || 0) : (order.vendors?.[0]?.deliveryCharge || 0),
                     ...enrichItemsAndTotal(order, isChat)
                 }
             };
@@ -1299,14 +1420,27 @@ exports.getCompletedOrders = async (req, res) => {
             'vendors.orderStatus': 'Delivered'
         }).sort({ updatedAt: -1 });
 
-        const mappedHistory = completedOrders.map(order => ({
-            orderId: order.orderId,
-            earning: order.driverDeliveryFee?.totalFee || 0,
-            date: order.updatedAt,
-            customerName: order.shippingAddress?.name || order.name,
-            address: order.shippingAddress?.address || 'N/A',
-            isChatOrder: false
-        }));
+        const Settings = require('../Settings/model');
+        let settings = await Settings.findOne();
+        if (!settings) settings = { driverDeliveryFee: { basePay: 30, baseDistance: 5, perKmRate: 10 } };
+        const { calculateDeliveryFee } = require('./pricingUtil');
+
+        const mappedHistory = completedOrders.map(order => {
+            let earning = order.driverDeliveryFee?.totalFee;
+            if (earning === undefined || earning === null || earning === 0) {
+                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
+                earning = feeInfo.amount || 0;
+            }
+
+            return {
+                orderId: order.orderId,
+                earning: earning,
+                date: order.updatedAt,
+                customerName: order.shippingAddress?.name || order.name,
+                address: order.shippingAddress?.address || 'N/A',
+                isChatOrder: false
+            };
+        });
 
         // Fetch completed chat orders
         const completedChatOrders = await ChatOrder.find({
@@ -1314,14 +1448,22 @@ exports.getCompletedOrders = async (req, res) => {
             orderStatus: 'Delivered'
         }).sort({ updatedAt: -1 });
 
-        const mappedChatHistory = completedChatOrders.map(order => ({
-            orderId: order.orderId,
-            earning: order.driverDeliveryFee?.totalFee || 0,
-            date: order.updatedAt,
-            customerName: order.shippingAddress?.name || order.name,
-            address: order.shippingAddress?.address || 'N/A',
-            isChatOrder: true
-        }));
+        const mappedChatHistory = completedChatOrders.map(order => {
+            let earning = order.driverDeliveryFee?.totalFee;
+            if (earning === undefined || earning === null || earning === 0) {
+                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
+                earning = feeInfo.amount || 0;
+            }
+
+            return {
+                orderId: order.orderId,
+                earning: earning,
+                date: order.updatedAt,
+                customerName: order.shippingAddress?.name || order.name,
+                address: order.shippingAddress?.address || 'N/A',
+                isChatOrder: true
+            };
+        });
 
         const finalHistory = [...mappedHistory, ...mappedChatHistory].sort((a, b) => new Date(b.date) - new Date(a.date));
 
