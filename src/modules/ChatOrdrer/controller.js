@@ -10,11 +10,11 @@ const { calculateDistance, calculateDeliveryFee } = require('../Driver/pricingUt
 
 // Function to create a new ChatOrder
 const createChatOrder = async (req, res) => {
-    console.log("api is hiiting")
+
     try {
         const { orderMessage, customer, name, shippingAddress, paymentStatus } = req.body;
         // Validate required fields
-        if (!orderMessage || !customer || !shippingAddress || !shippingAddress.address) {
+        if (!orderMessage || !customer || !shippingAddress) {
             return res.status(400).json({ message: 'Missing required fields' });
         }
 
@@ -26,7 +26,16 @@ const createChatOrder = async (req, res) => {
 
 
         // Calculate Delivery Charge
-        const vendorId = req.body.vendorId;
+        let vendorId = req.body.vendorId;
+
+        // If no vendorId is provided, assign the first admin vendor as default
+        if (!vendorId) {
+            const adminVendor = await Vendor.findOne({ role: 'admin' });
+            if (adminVendor) {
+                vendorId = adminVendor._id;
+            }
+        }
+
         const vendorDetails = await Vendor.findById(vendorId);
 
         let deliveryCharge = 0;
@@ -36,13 +45,14 @@ const createChatOrder = async (req, res) => {
             const vendorLat = vendorDetails.location.coordinates[1];
             const vendorLon = vendorDetails.location.coordinates[0];
             distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
+            distance = parseFloat(distance.toFixed(2));
 
             // Fetch settings for delivery charge configuration
             const settings = await Settings.findOne();
 
             // Use unified pricing logic ✅
             const feeInfo = calculateDeliveryFee(distance, settings);
-            deliveryCharge = feeInfo.amount;
+            deliveryCharge = parseFloat(feeInfo.amount.toFixed(2));
             var deliveryChargeDescription = feeInfo.description;
         }
 
@@ -56,7 +66,7 @@ const createChatOrder = async (req, res) => {
             name,
             shippingAddress,
             paymentStatus,
-            vendor: req.body.vendorId, // Assign the vendor if provided
+            vendor: vendorId, // Assign the vendor (either from request or default admin)
             is_new: true,
             deliveryCharge,
             deliveryChargeDescription,
@@ -95,8 +105,9 @@ const updateChatOrder = async (req, res) => {
             return res.status(400).json({ message: 'Missing required fields' });
         }
 
-        // Find the order by orderId
-        const order = await ChatOrder.findOne({ _id: orderId });
+        // Find the order by orderId or numeric orderId
+        const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
+        const order = await ChatOrder.findOne(query);
         if (!order) {
             return res.status(404).json({ message: 'Order not found' });
         }
@@ -131,7 +142,7 @@ const updateChatOrder = async (req, res) => {
             try {
                 // Assuming you have a function or service to send push notifications
                 let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
-                console.log("Push notification response:", pushNotificationRes);
+
             } catch (error) {
                 console.error('Error sending push notification:', error);
             }
@@ -149,8 +160,9 @@ const getChatOrder = async (req, res) => {
     try {
         const { orderId } = req.params;
 
-        // Find the order by orderId
-        const order = await ChatOrder.findOne({ _id: orderId })
+        // Find the order by orderId or numeric orderId
+        const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
+        const order = await ChatOrder.findOne(query)
             .populate('customer')
             .populate('vendor')
             .populate('driverId');
@@ -161,7 +173,7 @@ const getChatOrder = async (req, res) => {
         return res.status(200).json(order);
     } catch (error) {
         console.error('Error fetching chat order:', error);
-        return res.status(500).json({ message: 'Internal server error' });
+        return res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
 
@@ -176,6 +188,7 @@ const getChatOrdersByCustomer = async (req, res) => {
     try {
         const customerId = req.params.customerId;
 
+
         // Verify that the customer exists
         const customerExists = await Customer.findById(customerId);
         if (!customerExists) {
@@ -189,6 +202,7 @@ const getChatOrdersByCustomer = async (req, res) => {
         })
             .populate('customer')
             .populate('vendor')
+            .populate('driverId')
             .sort({ createdAt: -1 });
 
         return res.status(200).json(chatOrders);
@@ -230,7 +244,6 @@ const updateChatOrderStatus = async (req, res) => {
     const { orderId } = req.params;
     const { newStatus } = req.body;
 
-    console.log("orderId, newStatus==>>", orderId, newStatus);
 
     try {
         // Prepare the update object
@@ -239,9 +252,10 @@ const updateChatOrderStatus = async (req, res) => {
             updateData.arrivalAt = new Date(Date.now() + 15 * 60 * 1000); // Set arrival time to 15 minutes from now
         }
 
-        // Find the order by ID and update the status
+        // Find the order by ID or numeric orderID and update the status
+        const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
         const order = await ChatOrder.findOneAndUpdate(
-            { _id: orderId },
+            query,
             { $set: updateData },
             { new: true }
         );
@@ -278,7 +292,7 @@ const updateChatOrderStatus = async (req, res) => {
         try {
             // Assuming you have a function or service to send push notifications
             let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
-            console.log("Push notification response:", pushNotificationRes);
+
         } catch (error) {
             console.error('Error sending push notification:', error);
         }
@@ -305,8 +319,19 @@ const getChatOrdersByVendor = async (req, res) => {
             });
         }
 
+        const { startDate, endDate } = req.query;
+        let dateMatch = {};
+        if (startDate && endDate) {
+            dateMatch = {
+                createdAt: {
+                    $gte: new Date(startDate),
+                    $lte: new Date(endDate)
+                }
+            };
+        }
+
         const pipeline = [
-            { $unwind: "$vendor" }
+            { $match: dateMatch }
         ];
 
         // Include the $match stage only if the vendor's role is not 'admin'
@@ -337,6 +362,16 @@ const getChatOrdersByVendor = async (req, res) => {
             },
             // Unwind the vendorDetails array to get the object
             { $unwind: "$vendorDetails" },
+            // Lookup to join driver details
+            {
+                $lookup: {
+                    from: "drivers",
+                    localField: "driverId",
+                    foreignField: "_id",
+                    as: "driverDetails"
+                }
+            },
+            { $unwind: { path: "$driverDetails", preserveNullAndEmptyArrays: true } },
             // Group the data by order
             {
                 $group: {
@@ -348,20 +383,28 @@ const getChatOrdersByVendor = async (req, res) => {
                         shippingAddress: "$shippingAddress",
                         orderMessage: "$orderMessage",
                         vendor: "$vendorDetails",
-                        orderStatus: "$orderStatus",
+                        driver: "$driverDetails", // Include driver
                         totalAmount: "$totalAmount",
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
                         products: "$products",
                         createdAt: "$createdAt",
-                        is_new: "$is_new"
+                        is_new: "$is_new",
+                        deliveryCharge: "$deliveryCharge",
+                        shippingFee: "$shippingFee",
+                        // Financial Fields
+                        vendorPaymentStatus: "$vendorPaymentStatus",
+                        driverEarningStatus: "$driverEarningStatus",
+                        floatingCashStatus: "$floatingCashStatus",
+                        floatingCashAmount: "$floatingCashAmount",
+                        deliveredAt: "$deliveredAt"
                     }
                 }
             },
             // Project to reshape the output document
             {
                 $project: {
-                    _id: 0,
+                    _id: "$_id.orderId", // Change back to _id as root
                     orderId: "$_id.orderId",
                     shortId: "$_id.shortId",
                     orderStatus: "$_id.orderStatus",
@@ -374,6 +417,14 @@ const getChatOrdersByVendor = async (req, res) => {
                     is_new: "$_id.is_new",
                     orderMessage: "$_id.orderMessage",
                     totalAmount: "$_id.totalAmount",
+                    deliveryCharge: "$_id.deliveryCharge",
+                    shippingFee: "$_id.shippingFee",
+                    driverId: "$_id.driver", // Include driver in root
+                    vendorPaymentStatus: "$_id.vendorPaymentStatus",
+                    driverEarningStatus: "$_id.driverEarningStatus",
+                    floatingCashStatus: "$_id.floatingCashStatus",
+                    floatingCashAmount: "$_id.floatingCashAmount",
+                    deliveredAt: "$_id.deliveredAt",
                     vendors: {
                         vendor: "$_id.vendor",
                         orderStatus: "$_id.orderStatus"
@@ -398,11 +449,11 @@ const getChatOrdersByVendor = async (req, res) => {
 };
 
 const updateOrderAmountAndStatus = async (req, res) => {
-    console.log("updateOrderAmountAndStatus api")
+
     try {
         const { chatOrderId, totalAmount } = req.body;
 
-        console.log("chatOrderId, totalAmount-->>", chatOrderId, totalAmount)
+
 
 
         if (!chatOrderId) {
@@ -454,11 +505,11 @@ const updateOrderAmountAndStatus = async (req, res) => {
 
 const updateChatPaymentStatusManually = async (req, res) => {
     try {
-        console.log("updatePaymentStatus")
+
         // Extract required fields from the request body
         const { orderId, newStatus } = req.body;
 
-        console.log("orderId, newStatus-->>", orderId, newStatus)
+
 
         // Ensure all required fields are present
         if (!newStatus || !orderId) {
@@ -494,7 +545,7 @@ const updateChatPaymentStatusManually = async (req, res) => {
 
 
 const getNewChatOrdersCountByVendor = async (req, res) => {
-    console.log("it is called?")
+
     try {
         const vendorId = req.params.vendorId; // Assuming vendorId is passed as a URL parameter
 
@@ -504,7 +555,7 @@ const getNewChatOrdersCountByVendor = async (req, res) => {
             is_new: true
         });
 
-        console.log("newchatOrdersCount-->>", newOrdersCount)
+
 
         res.status(200).json({ newOrdersCount });
     } catch (error) {
@@ -515,7 +566,7 @@ const getNewChatOrdersCountByVendor = async (req, res) => {
 
 
 const markChatOrderViewed = async (req, res) => {
-    console.log("markOrderViewed is called")
+
     try {
         const vendorId = req.params.vendorId;
 
@@ -533,7 +584,8 @@ const markChatOrderViewed = async (req, res) => {
 const getChatOrderInvoice = async (req, res) => {
     try {
         const { orderId } = req.params;
-        const order = await ChatOrder.findById(orderId)
+        const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
+        const order = await ChatOrder.findOne(query)
             .populate('customer')
             .populate('vendor');
 

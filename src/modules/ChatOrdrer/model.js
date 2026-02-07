@@ -109,6 +109,48 @@ const orderSchema = new Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Driver',
     },
+    driverDeliveryFee: {
+        totalDistance: Number,
+        currentToPickup: Number,
+        pickupToDrop: Number,
+        basePay: Number,
+        extraDistance: Number,
+        extraPay: Number,
+        totalFee: Number,
+        calculatedAt: Date,
+    },
+    driverEarningStatus: {
+        type: String,
+        enum: ["Pending", "Paid"],
+        default: "Pending",
+    },
+    floatingCashStatus: {
+        type: String,
+        enum: ["Pending", "Paid"],
+        default: "Pending",
+    },
+    floatingCashAmount: {
+        type: Number,
+        default: 0,
+    },
+    deliveredAt: {
+        type: Date,
+        default: null,
+    },
+    vendorPaymentStatus: {
+        type: String,
+        enum: ["Pending", "Paid"],
+        default: "Pending",
+    },
+    razorpay_payment_id: {
+        type: String,
+    },
+    razorpay_order_id: {
+        type: String,
+    },
+    razorpay_signature: {
+        type: String,
+    },
 });
 
 // Middleware to generate unique orderId and set the vendor to admin

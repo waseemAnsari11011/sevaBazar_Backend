@@ -1,5 +1,6 @@
 const Driver = require('../Driver/model');
 const Order = require('../Order/model');
+const ChatOrder = require('../ChatOrdrer/model');
 const { Product } = require('../Product/model');
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
@@ -416,7 +417,19 @@ exports.getOrdersByVendor = async (req, res) => {
             });
         }
 
+        const { startDate, endDate } = req.query;
+        let dateMatch = {};
+        if (startDate && endDate) {
+            dateMatch = {
+                createdAt: {
+                    $gte: new Date(startDate),
+                    $lte: new Date(endDate)
+                }
+            };
+        }
+
         const pipeline = [
+            { $match: dateMatch },
             { $unwind: { path: "$vendors", preserveNullAndEmptyArrays: true } }
         ];
 
@@ -1224,7 +1237,11 @@ exports.handleOrderOfferResponse = async (req, res) => {
 exports.getOrderDetailsByVendor = async (req, res) => {
     try {
         const { orderId, vendorId } = req.params;
-        console.log(`[DEBUG] getOrderDetailsByVendor: orderId=${orderId}, vendorId=${vendorId}`);
+        const vId = new mongoose.Types.ObjectId(vendorId);
+
+        // Check if the requesting user is an Admin
+        const requestingVendor = await Vendor.findById(vId);
+        const isAdmin = requestingVendor && requestingVendor.role === 'admin';
 
         let matchQuery = {};
         if (mongoose.Types.ObjectId.isValid(orderId)) {
@@ -1233,164 +1250,181 @@ exports.getOrderDetailsByVendor = async (req, res) => {
             matchQuery = { orderId: orderId };
         }
 
-        const vId = new mongoose.Types.ObjectId(vendorId);
+        // Try to find if it's a ChatOrder or Normal Order
+        const chatOrderCheck = await ChatOrder.findOne(matchQuery);
+        const isChatOrder = !!chatOrderCheck;
 
-        // Check if the requesting user is an Admin
-        const requestingVendor = await Vendor.findById(vId);
-        const isAdmin = requestingVendor && requestingVendor.role === 'admin';
+        let pipeline = [];
 
-        console.log(`[DEBUG] Match Query:`, JSON.stringify(matchQuery), `vId=${vId}, isAdmin=${isAdmin}`);
-
-        const pipeline = [
-            { $match: matchQuery },
-            {
-                $addFields: {
-                    customer: {
-                        $cond: {
-                            if: { $eq: [{ $type: "$customer" }, "string"] },
-                            then: { $toObjectId: "$customer" },
-                            else: "$customer"
+        if (isChatOrder) {
+            pipeline = [
+                { $match: matchQuery },
+                {
+                    $lookup: {
+                        from: "customers",
+                        localField: "customer",
+                        foreignField: "_id",
+                        as: "customer"
+                    }
+                },
+                { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: "vendors",
+                        localField: "vendor",
+                        foreignField: "_id",
+                        as: "vendorDetails"
+                    }
+                },
+                { $unwind: { path: "$vendorDetails", preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: "drivers",
+                        localField: "driverId",
+                        foreignField: "_id",
+                        as: "driver"
+                    }
+                },
+                { $unwind: { path: "$driver", preserveNullAndEmptyArrays: true } },
+                {
+                    $project: {
+                        _id: 1,
+                        orderId: 1,
+                        orderStatus: 1,
+                        createdAt: 1,
+                        totalAmount: 1,
+                        customer: 1,
+                        customerNameFallback: "$name",
+                        shippingAddress: 1,
+                        vendorPaymentStatus: 1,
+                        driverEarningStatus: 1,
+                        floatingCashStatus: 1,
+                        floatingCashAmount: 1,
+                        driverDeliveryFee: 1,
+                        deliveredAt: 1,
+                        vendorDetails: 1,
+                        driver: 1,
+                        pickupOtp: 1,
+                        items: {
+                            $map: {
+                                input: "$products",
+                                as: "p",
+                                in: {
+                                    name: "$$p.name",
+                                    price: "$$p.price",
+                                    quantity: "$$p.quantity",
+                                    totalAmount: { $ifNull: ["$$p.totalAmount", { $multiply: ["$$p.price", "$$p.quantity"] }] },
+                                    image: null
+                                }
+                            }
                         }
                     }
                 }
-            },
-            { $unwind: { path: "$vendors", preserveNullAndEmptyArrays: true } },
-        ];
-
-        // Only filter by valid vendor ID if NOT admin
-        if (!isAdmin) {
-            pipeline.push({ $match: { "vendors.vendor": vId } });
-        }
-
-        pipeline.push(
-            {
-                $lookup: {
-                    from: "customers",
-                    localField: "customer",
-                    foreignField: "_id",
-                    as: "customer"
-                }
-            },
-            { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
-            { $unwind: { path: "$vendors.products", preserveNullAndEmptyArrays: true } },
-            {
-                $lookup: {
-                    from: "products",
-                    localField: "vendors.products.product",
-                    foreignField: "_id",
-                    as: "productDetails"
-                }
-            },
-            { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
-            // Lookup Vendor to get details (for Admin view especially)
-            {
-                $lookup: {
-                    from: "vendors",
-                    localField: "vendors.vendor",
-                    foreignField: "_id",
-                    as: "vendorDetails"
-                }
-            },
-            { $unwind: { path: "$vendorDetails", preserveNullAndEmptyArrays: true } },
-            {
-                $group: {
-                    _id: "$_id",
-                    orderId: { $first: "$orderId" },
-                    orderStatus: { $first: "$vendors.orderStatus" },
-                    createdAt: { $first: "$createdAt" },
-                    totalAmount: { $sum: "$vendors.products.totalAmount" },
-                    customer: { $first: "$customer" },
-                    customerNameFallback: { $first: "$name" },
-                    pickupOtp: { $first: "$pickupOtp" },
-                    driverId: { $first: "$driverId" },
-                    deliveryCharge: { $first: "$vendors.deliveryCharge" },
-                    shippingFee: { $first: "$vendors.shippingFee" },
-                    shippingAddress: { $first: "$shippingAddress" },
-
-                    // Payment Statuses
-                    vendorPaymentStatus: { $first: "$vendorPaymentStatus" },
-                    driverEarningStatus: { $first: "$driverEarningStatus" },
-                    floatingCashStatus: { $first: "$floatingCashStatus" },
-                    floatingCashAmount: { $first: "$floatingCashAmount" },
-
-                    // Arrays
-                    items: {
-                        $push: {
-                            name: { $ifNull: ["$productDetails.name", "$vendors.products.name"] },
-                            price: "$vendors.products.price",
-                            quantity: "$vendors.products.quantity",
-                            totalAmount: "$vendors.products.totalAmount",
-                            image: { $arrayElemAt: [{ $arrayElemAt: ["$vendors.products.variations.images", 0] }, 0] },
-                            variations: "$vendors.products.variations"
+            ];
+        } else {
+            // Normal Order Pipeline
+            pipeline = [
+                { $match: matchQuery },
+                {
+                    $addFields: {
+                        customer: {
+                            $cond: {
+                                if: { $eq: [{ $type: "$customer" }, "string"] },
+                                then: { $toObjectId: "$customer" },
+                                else: "$customer"
+                            }
                         }
-                    },
-                    // We need to keep vendor details. Since we might have multiple vendors in the original order,
-                    // but here we unwound `vendors`, if we didn't match specific vendor, we might get multiple groups?
-                    // Wait, `matchQuery` matches ONE order.
-                    // If Admin views it, and there are multiple vendors, `$unwind vendors` creates multiple docs.
-                    // `$group` will re-merge them if we group by `_id` (Order ID).
-                    // BUT `items` will be merged from all vendors.
-                    // Admin needs to see breakdown?
-                    // "Admin Panel... View Detail... Vendor Detail... Driver Detail..."
-                    // If multiple vendors, we should probably return an array of vendor details?
-                    // For now, let's assume one vendor per order or simpler grouping.
-                    // Actually, the current frontend likely expects one object.
+                    }
+                },
+                { $unwind: { path: "$vendors", preserveNullAndEmptyArrays: true } },
+            ];
 
-                    vendorDetails: { $first: "$vendorDetails" }, // Taking first for now
-                    driver: { $first: "$driver" },
-                    driverDeliveryFee: { $first: "$driverDeliveryFee" }
-                }
-            },
-            {
-                $lookup: {
-                    from: "drivers",
-                    localField: "driverId",
-                    foreignField: "_id",
-                    as: "driver"
-                }
-            },
-            { $unwind: { path: "$driver", preserveNullAndEmptyArrays: true } },
-            {
-                $project: {
-                    _id: 1,
-                    orderId: 1,
-                    orderStatus: 1,
-                    createdAt: 1,
-                    totalAmount: 1,
-                    deliveryCharge: 1,
-                    shippingFee: 1,
-                    customer: 1,
-                    customerNameFallback: 1,
-                    pickupOtp: 1,
-                    driverId: 1,
-                    shippingAddress: 1,
-                    items: 1,
-                    vendorDetails: 1, // Include full vendor details
-                    driver: 1, // Include full driver details
-
-                    vendorPaymentStatus: 1,
-                    driverEarningStatus: 1,
-                    floatingCashStatus: 1,
-                    floatingCashAmount: 1,
-                    driverDeliveryFee: 1,
-
-                    riderName: "$driver.personalDetails.name",
-                    riderContact: "$driver.personalDetails.phone"
-                }
+            if (!isAdmin) {
+                pipeline.push({ $match: { "vendors.vendor": vId } });
             }
-        );
 
-        const order = await Order.aggregate(pipeline);
-
-        if (!order || order.length === 0) {
-            console.log(`[DEBUG] Order NOT found for oId=${orderId}, vId=${vendorId}`);
-            return res.status(404).json({ success: false, message: 'Order not found' });
+            pipeline.push(
+                {
+                    $lookup: {
+                        from: "customers",
+                        localField: "customer",
+                        foreignField: "_id",
+                        as: "customer"
+                    }
+                },
+                { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+                { $unwind: { path: "$vendors.products", preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: "products",
+                        localField: "vendors.products.product",
+                        foreignField: "_id",
+                        as: "productDetails"
+                    }
+                },
+                { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: "vendors",
+                        localField: "vendors.vendor",
+                        foreignField: "_id",
+                        as: "vendorDetails"
+                    }
+                },
+                { $unwind: { path: "$vendorDetails", preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: "drivers",
+                        localField: "driverId",
+                        foreignField: "_id",
+                        as: "driver"
+                    }
+                },
+                { $unwind: { path: "$driver", preserveNullAndEmptyArrays: true } },
+                {
+                    $group: {
+                        _id: "$_id",
+                        orderId: { $first: "$orderId" },
+                        orderStatus: { $first: "$vendors.orderStatus" },
+                        createdAt: { $first: "$createdAt" },
+                        totalAmount: { $sum: "$vendors.products.totalAmount" },
+                        customer: { $first: "$customer" },
+                        customerNameFallback: { $first: "$name" },
+                        driverId: { $first: "$driver" },
+                        shippingAddress: { $first: "$shippingAddress" },
+                        vendorPaymentStatus: { $first: "$vendorPaymentStatus" },
+                        driverEarningStatus: { $first: "$driverEarningStatus" },
+                        floatingCashStatus: { $first: "$floatingCashStatus" },
+                        floatingCashAmount: { $first: "$floatingCashAmount" },
+                        driverDeliveryFee: { $first: "$driverDeliveryFee" },
+                        deliveredAt: { $first: "$deliveredAt" },
+                        vendorDetails: { $first: "$vendorDetails" },
+                        pickupOtp: { $first: "$pickupOtp" },
+                        items: {
+                            $push: {
+                                name: { $ifNull: ["$productDetails.name", "$vendors.products.name"] },
+                                price: "$vendors.products.price",
+                                quantity: "$vendors.products.quantity",
+                                totalAmount: "$vendors.products.totalAmount",
+                                image: { $arrayElemAt: [{ $arrayElemAt: ["$vendors.products.variations.images", 0] }, 0] },
+                                variations: "$vendors.products.variations"
+                            }
+                        }
+                    }
+                }
+            );
         }
 
-        console.log(`[DEBUG] Order found: ${order[0].orderId}`);
-        res.status(200).json({ success: true, data: order[0] });
+        const result = isChatOrder ? await ChatOrder.aggregate(pipeline) : await Order.aggregate(pipeline);
+
+        if (!result || result.length === 0) {
+            return res.status(404).json({ success: false, message: 'Order details not found' });
+        }
+
+        res.status(200).json({ success: true, data: result[0] });
+
     } catch (error) {
-        console.error("Error fetching order details:", error);
+        console.error("Error in getOrderDetailsByVendor:", error);
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
@@ -1431,7 +1465,9 @@ exports.seedTestOrder = async (req, res) => {
         console.error("Seed error:", error);
         res.status(500).json({ success: false, error: error.message });
     }
-}; exports.getOrderInvoice = async (req, res) => {
+};
+
+exports.getOrderInvoice = async (req, res) => {
     try {
         const { orderId } = req.params;
         const vendorId = req.query.vendorId; // Optional: to filter specific vendor products if needed
@@ -1566,7 +1602,10 @@ exports.adminUpdatePaymentStatus = async (req, res) => {
         const { orderId } = req.params;
         const { type, status } = req.body; // type: 'vendorPayment' | 'driverEarning' | 'floatingCash'
 
-        const order = await Order.findById(orderId);
+        let order = await Order.findById(orderId);
+        if (!order) {
+            order = await ChatOrder.findById(orderId);
+        }
         if (!order) return res.status(404).json({ error: 'Order not found' });
 
         if (type === 'vendorPayment') {
@@ -1580,9 +1619,6 @@ exports.adminUpdatePaymentStatus = async (req, res) => {
                 if (order.driverId) {
                     const driver = await Driver.findById(order.driverId);
                     if (driver) {
-                        // Deduct the specific amount associated with this order
-                        // If we didn't save it on order, we recalculate or use 0.
-                        // (We saved it in previous step as floatingCashAmount)
                         const amountToDeduct = order.floatingCashAmount || 0;
                         driver.floatingCash = Math.max(0, (driver.floatingCash || 0) - amountToDeduct);
                         await driver.save();
@@ -1590,9 +1626,6 @@ exports.adminUpdatePaymentStatus = async (req, res) => {
                     }
                 }
             }
-            // Note: If reverting from Paid -> Pending, maybe we should add debt back? 
-            // For now, let's keep it simple: Only handle Pending -> Paid flow for debt reduction.
-
             order.floatingCashStatus = status;
         }
 
