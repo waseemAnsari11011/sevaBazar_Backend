@@ -543,7 +543,7 @@ exports.searchVendors = async (req, res) => {
     // 5. Combine both filters using $and
     // This finds documents that match BOTH the locationFilter AND the searchFilter.
     const finalQuery = {
-      $and: [locationFilter, searchFilter, { isDeleted: { $ne: true } }],
+      $and: [locationFilter, searchFilter, { isDeleted: { $ne: true } }, { isBlocked: { $ne: true } }],
     };
 
     // 6. Execute the final query
@@ -592,7 +592,8 @@ exports.getAllVendors = async (req, res) => {
 
     // 5. Find vendors, sort by most recent, apply pagination
     // 5. Find vendors, sort by most recent, apply pagination
-    const vendors = await Vendor.find({ ...locationFilter, isDeleted: { $ne: true } })
+    // 5. Find vendors, sort by most recent, apply pagination
+    const vendors = await Vendor.find({ ...locationFilter, isDeleted: { $ne: true }, isBlocked: { $ne: true } })
       .sort({ isOnline: -1, createdAt: -1 }) // Sort by online status then creation date
       .skip((page - 1) * limit)
       .limit(limit)
@@ -600,7 +601,8 @@ exports.getAllVendors = async (req, res) => {
 
     // 6. Count total documents matching the filter for pagination metadata
     // 6. Count total documents matching the filter for pagination metadata
-    const totalVendors = await Vendor.countDocuments({ ...locationFilter, isDeleted: { $ne: true } });
+    // 6. Count total documents matching the filter for pagination metadata
+    const totalVendors = await Vendor.countDocuments({ ...locationFilter, isDeleted: { $ne: true }, isBlocked: { $ne: true } });
 
     res.status(200).json({
       total: totalVendors,
@@ -636,7 +638,7 @@ exports.getAllVendorsAdmin = async (req, res) => {
     // .sort() orders the results, showing the most recently created vendors first.
     const vendors = await Vendor.find({ isDeleted: { $ne: true } })
       .select(
-        "name email vendorInfo.contactNumber vendorInfo.businessName location.address.postalCodes isRestricted"
+        "name email vendorInfo.contactNumber vendorInfo.businessName location.address.postalCodes isRestricted isBlocked rejectionCount"
       )
       .sort({ createdAt: -1 });
 
@@ -672,6 +674,7 @@ exports.getVendorsWithDiscounts = async (req, res) => {
         $match: {
           ...locationFilter,
           isDeleted: { $ne: true },
+          isBlocked: { $ne: true },
         },
       },
       // Stage 2: Join Vendor with Products
@@ -923,6 +926,36 @@ exports.unRestrictVendor = async (req, res) => {
   }
 };
 
+// Unblock Vendor (Manual)
+exports.unblockVendor = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedVendor = await Vendor.findByIdAndUpdate(
+      id,
+      {
+        isBlocked: false,
+        rejectionCount: 0,
+        lastRejectionResetDate: new Date(),
+        $unset: { blockedAt: 1 }
+      },
+      { new: true }
+    );
+    if (!updatedVendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+    res.status(200).json({
+      message: "Vendor unblocked successfully",
+      vendor: updatedVendor,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to unblock vendor",
+      error: error.message,
+    });
+  }
+};
+
 // PATCH /vendors/:id/toggle-status
 exports.toggleVendorStatus = async (req, res) => {
   try {
@@ -932,7 +965,7 @@ exports.toggleVendorStatus = async (req, res) => {
       return res.status(404).json({ message: "Vendor not found" });
     }
     vendor.isOnline = !vendor.isOnline;
-    vendor.status = vendor.isOnline ? "online" : "offline";
+    vendor.status = vendor.isOnline ? "open" : "closed";
     vendor.updatedAt = Date.now();
     await vendor.save();
     res.status(200).json({
@@ -959,7 +992,8 @@ exports.getAllVendorsGroupedByCategory = async (req, res) => {
     const pipeline = [
       {
         // Stage 1: Find all vendors matching the user's location filter
-        $match: { ...locationFilter, isDeleted: { $ne: true } },
+        // Stage 1: Find all vendors matching the user's location filter
+        $match: { ...locationFilter, isDeleted: { $ne: true }, isBlocked: { $ne: true } },
       },
       {
         // --- (NEW) Stage 2: Add a random sort field to each document ---
@@ -1085,6 +1119,7 @@ exports.getVendorsByCategory = async (req, res) => {
       category: categoryId,
       ...locationFilter, // Spread the { $or: [...] } object
       isDeleted: { $ne: true },
+      isBlocked: { $ne: true },
     };
 
     // 4. Find vendors matching the combined query
@@ -1327,7 +1362,7 @@ exports.searchVendorsByCategory = async (req, res) => {
 
     if (!q) {
       // If search query is empty, return all vendors for the category
-      const vendors = await Vendor.find({ category: categoryId, isDeleted: { $ne: true } });
+      const vendors = await Vendor.find({ category: categoryId, isDeleted: { $ne: true }, isBlocked: { $ne: true } });
       return res.status(200).json(vendors);
     }
 
@@ -1337,6 +1372,7 @@ exports.searchVendorsByCategory = async (req, res) => {
       category: categoryId,
       $or: [{ "vendorInfo.businessName": searchQuery }, { name: searchQuery }],
       isDeleted: { $ne: true },
+      isBlocked: { $ne: true },
     }).sort({ isOnline: -1 });
 
     res.status(200).json(vendors);
@@ -1344,5 +1380,31 @@ exports.searchVendorsByCategory = async (req, res) => {
     res
       .status(500)
       .json({ message: "Error searching vendors", error: error.message });
+  }
+};
+
+exports.saveDeviceToken = async (req, res) => {
+  try {
+    const { deviceToken } = req.body;
+    const vendorId = req.user.id;
+
+    if (!deviceToken) {
+      return res.status(400).json({ message: "Device token is required" });
+    }
+
+    const vendor = await Vendor.findByIdAndUpdate(
+      vendorId,
+      { deviceToken },
+      { new: true }
+    );
+
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+
+    res.status(200).json({ message: "Device token saved successfully" });
+  } catch (error) {
+    console.error("Save Device Token Error:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };

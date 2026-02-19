@@ -134,8 +134,6 @@ exports.updatePaymentStatus = async (req, res) => {
         // Extract required fields from the request body
         const { orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature, vendors } = req.body;
 
-        console.log("vendors-->>", vendors)
-
         // Ensure all required fields are present
         if (!orderId || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
             return res.status(400).json({ error: 'Missing required fields' });
@@ -199,6 +197,55 @@ exports.updatePaymentStatus = async (req, res) => {
         // Save the updated order
         const updatedOrder = await order.save();
 
+        // Notify Vendors if payment is verified
+        if (updatedOrder && updatedOrder.isPaymentVerified) {
+            try {
+                const io = req.app.get('io');
+                if (io) {
+                    for (const v of updatedOrder.vendors) {
+                        const vendorId = v.vendor.toString();
+                        const vendorDetails = await Vendor.findById(v.vendor);
+
+                        const alertData = {
+                            type: 'new_order',
+                            orderId: updatedOrder._id.toString(),
+                            shortId: updatedOrder.orderId,
+                            totalAmount: v.products.reduce((sum, p) => sum + (p.totalAmount || 0), 0),
+                            itemCount: v.products.reduce((sum, p) => sum + p.quantity, 0),
+                            productSummary: v.products.map(p => `${p.name} x${p.quantity}`).join(', '),
+                            customerName: updatedOrder.name || 'Customer',
+                            customerAddress: updatedOrder.shippingAddress?.addressLine1 || ''
+                        };
+
+                        console.log(`[SOCKET] Emitting new_order (PAID) to vendor: ${vendorId}`);
+                        io.to(vendorId).emit('new_order', alertData);
+
+                        if (vendorDetails && vendorDetails.deviceToken) {
+                            const fs = require('fs');
+                            fs.appendFileSync('fcm_debug.log', `\n[${new Date().toISOString()}] Order ${updatedOrder.orderId} (PAID): Sending to vendor ${vendorId}\n`);
+
+                            const pushTitle = "New Order Received! 🛎️";
+                            const pushBody = `You have a new PAID order #${updatedOrder.orderId}. Open to accept!`;
+                            const pushData = {
+                                type: 'new_order',
+                                orderId: updatedOrder._id.toString(),
+                                shortId: updatedOrder.orderId,
+                                totalAmount: alertData.totalAmount.toString(),
+                                itemCount: alertData.itemCount.toString(),
+                                productSummary: alertData.productSummary,
+                                customerName: alertData.customerName,
+                                customerAddress: alertData.customerAddress
+                            };
+                            sendPushNotification(vendorDetails.deviceToken, pushTitle, pushBody, pushData)
+                                .catch(err => console.error(`[PUSH] Vendor alert error (PAID):`, err.message));
+                        }
+                    }
+                }
+            } catch (notifErr) {
+                console.error("[NOTIF] updatePaymentStatus notification error:", notifErr);
+            }
+        }
+
         res.status(200).json(updatedOrder);
     } catch (error) {
         console.log("error-->>", error)
@@ -253,14 +300,11 @@ exports.createOrder = async (req, res) => {
     try {
         const { customer, vendors, shippingAddress } = req.body;
 
-        console.log("shippingAddress==>>>>", shippingAddress)
-
         // Validate required fields
         if (!customer || !vendors || !shippingAddress) {
             return res.status(400).json({ error: 'All required fields must be provided' });
         }
         const customerDetails = await Customer.findById(customer);
-        console.log("customerDetails--->", customerDetails)
 
 
         // Validate each vendor and their products
@@ -365,8 +409,6 @@ exports.createOrder = async (req, res) => {
             shippingFee: 9 // Fixed shipping fee
         });
 
-        console.log("vendor-->>", vendors[0].products)
-
         // Save the order to the database
         const savedOrder = await newOrder.save();
 
@@ -392,11 +434,63 @@ exports.createOrder = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
+        // --- Notification Logic for Vendors ---
+        const io = req.app.get('io');
+        // Use savedOrder.vendors to get calculated fields
+        for (const v of savedOrder.vendors) {
+            const vendorId = v.vendor.toString();
+            const vendorDetails = await Vendor.findById(v.vendor);
+
+            const alertData = {
+                type: 'new_order',
+                orderId: savedOrder._id.toString(),
+                vendorId: vendorId,
+                shortId: savedOrder.orderId,
+                totalAmount: v.products.reduce((sum, p) => sum + (p.totalAmount || 0), 0),
+                itemCount: v.products.reduce((sum, p) => sum + p.quantity, 0),
+                productSummary: v.products.map(p => `${p.name} x${p.quantity}`).join(', '),
+                customerName: customerDetails.name || 'Customer',
+                customerAddress: savedOrder.shippingAddress?.addressLine1 || ''
+            };
+
+            console.log(`[SOCKET] Emitting new_order to vendor: ${vendorId}`, alertData);
+            if (io) {
+                io.to(vendorId).emit('new_order', alertData);
+            }
+
+            // Push Notification for wake-up/background
+            const fs = require('fs');
+            const tokenStat = vendorDetails?.deviceToken ? 'FOUND' : 'NOT FOUND';
+            fs.appendFileSync('fcm_debug.log', `\n[${new Date().toISOString()}] Order ${savedOrder.orderId}: Checking token for vendor ${vendorId}: ${tokenStat}\n`);
+
+            console.log(`[PUSH] Checking token for vendor ${vendorId}: ${vendorDetails?.deviceToken ? 'FOUND' : 'NOT FOUND'}`);
+            if (vendorDetails && vendorDetails.deviceToken) {
+                console.log(`[PUSH] Sending new order alert to vendor: ${vendorDetails.name} (Token: ${vendorDetails.deviceToken.substring(0, 10)}...)`);
+                const pushTitle = "New Order Received! 🛎️";
+                const pushBody = `You have a new order #${savedOrder.orderId}. Open to accept!`;
+
+                // Sanitize data for push
+                const pushData = {
+                    type: 'new_order',
+                    orderId: savedOrder._id.toString(),
+                    vendorId: vendorId, // Add this
+                    shortId: savedOrder.orderId,
+                    totalAmount: alertData.totalAmount.toString(),
+                    itemCount: alertData.itemCount.toString(),
+                    productSummary: alertData.productSummary,
+                    customerName: alertData.customerName,
+                    customerAddress: alertData.customerAddress
+                };
+
+                sendPushNotification(vendorDetails.deviceToken, pushTitle, pushBody, pushData)
+                    .catch(err => console.error(`[PUSH] Vendor alert error:`, err.message));
+            }
+        }
         res.status(201).json(savedOrder);
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        res.status(400).json({ error: error.message });
+        res.status(400).json(error.message ? { error: error.message } : { error: 'Unknown error' });
     }
 };
 
@@ -417,11 +511,12 @@ exports.getOrdersByVendor = async (req, res) => {
             });
         }
 
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, dateField } = req.query;
         let dateMatch = {};
         if (startDate && endDate) {
+            const field = dateField || 'createdAt';
             dateMatch = {
-                createdAt: {
+                [field]: {
                     $gte: new Date(startDate),
                     $lte: new Date(endDate)
                 }
@@ -514,7 +609,9 @@ exports.getOrdersByVendor = async (req, res) => {
                         vendorPaymentStatus: "$vendorPaymentStatus",
                         driverEarningStatus: "$driverEarningStatus",
                         floatingCashStatus: "$floatingCashStatus",
-                        floatingCashAmount: "$floatingCashAmount"
+                        floatingCashAmount: "$floatingCashAmount",
+                        deliveredAt: "$deliveredAt",
+                        vendorBillFile: "$vendorBillFile"
                     },
                     totalAmount: { $sum: "$vendors.products.totalAmount" },
                     products: {
@@ -538,11 +635,13 @@ exports.getOrdersByVendor = async (req, res) => {
                     paymentStatus: "$_id.paymentStatus",
                     razorpay_payment_id: "$_id.razorpay_payment_id",
                     createdAt: "$_id.createdAt",
+                    deliveredAt: "$_id.deliveredAt", // Added deliveredAt
                     is_new: "$_id.is_new",
                     vendorPaymentStatus: "$_id.vendorPaymentStatus",
                     driverEarningStatus: "$_id.driverEarningStatus",
                     floatingCashStatus: "$_id.floatingCashStatus",
                     floatingCashAmount: "$_id.floatingCashAmount",
+                    vendorBillFile: "$_id.vendorBillFile",
                     totalAmount: 1,
                     vendors: {
                         vendor: "$_id.vendor",
@@ -576,8 +675,6 @@ exports.getNewOrdersCountByVendor = async (req, res) => {
             'vendors.vendor': vendorId,
             is_new: true
         });
-
-        // console.log("newOrdersCount-->>", newOrdersCount)
 
         res.status(200).json({ newOrdersCount });
     } catch (error) {
@@ -713,6 +810,30 @@ exports.updateOrderStatus = async (req, res) => {
             ? { _id: orderId, 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) }
             : { orderId: orderId, 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) };
 
+        // ===== Auto-Block Logic for Vendor =====
+        if (newStatus === 'Cancelled') {
+            try {
+                const vendorDoc = await Vendor.findById(vendorId);
+                if (vendorDoc) {
+                    vendorDoc.rejectionCount = (vendorDoc.rejectionCount || 0) + 1;
+
+                    // Check if threshold reached (3 rejections)
+                    if (vendorDoc.rejectionCount >= 3) {
+                        vendorDoc.isBlocked = true;
+                        vendorDoc.blockedAt = new Date();
+                        console.log(`Vendor ${vendorId} blocked due to ${vendorDoc.rejectionCount} rejections.`);
+                        // Send email notification
+                        emailService.sendVendorBlockEmail(vendorDoc.email, vendorDoc.name).catch(e => console.error("Email fail:", e));
+                    }
+                    await vendorDoc.save();
+                }
+            } catch (blockError) {
+                console.error('Error in vendor auto-block logic:', blockError);
+                // Continue with order update even if blocking fails
+            }
+        }
+        // =======================================
+
         const order = await Order.findOneAndUpdate(
             updateQuery,
             { $set: { 'vendors.$.orderStatus': newStatus } },
@@ -759,7 +880,6 @@ exports.updateOrderStatus = async (req, res) => {
             const currentTime = new Date();
             const createdAt = order.createdAt;
             const deliveredInMin = Math.floor((currentTime - createdAt) / 60000); // Difference in minutes
-            console.log("deliveredInMin-->", deliveredInMin)
 
             // Update the deliveredInMin field for the specific vendor
             order.vendors.forEach(vendor => {

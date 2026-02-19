@@ -77,14 +77,9 @@ const createChatOrder = async (req, res) => {
         // Save the order to the database
         const savedOrder = await newChatOrder.save();
 
-        // console.log("savedOrder->", savedOrder)
 
-
-        // Fetch the vendor's role using the vendorId
         // const vendorDetails = await Vendor.findById(savedOrder.vendor)
         const customerDetails = await Customer.findById(savedOrder.customer)
-
-        // console.log("vendorDetails->", vendorDetails)
 
         await emailService.sendNewChatOrderNotificationEmail(vendorDetails.email, savedOrder, customerDetails);
 
@@ -260,6 +255,30 @@ const updateChatOrderStatus = async (req, res) => {
             { new: true }
         );
 
+        // ===== Auto-Block Logic for Vendor (Chat Order) =====
+        if (newStatus === 'Cancelled' && order) {
+            try {
+                const vendorId = order.vendor;
+                const vendorDoc = await Vendor.findById(vendorId);
+                if (vendorDoc) {
+                    vendorDoc.rejectionCount = (vendorDoc.rejectionCount || 0) + 1;
+
+                    // Check if threshold reached (3 rejections)
+                    if (vendorDoc.rejectionCount >= 3) {
+                        vendorDoc.isBlocked = true;
+                        vendorDoc.blockedAt = new Date();
+                        console.log(`Vendor ${vendorId} blocked due to ${vendorDoc.rejectionCount} rejections (Chat Order).`);
+                        // Send email notification
+                        emailService.sendVendorBlockEmail(vendorDoc.email, vendorDoc.name).catch(e => console.error("Email fail:", e));
+                    }
+                    await vendorDoc.save();
+                }
+            } catch (blockError) {
+                console.error('Error in vendor auto-block logic (Chat Order):', blockError);
+            }
+        }
+        // ====================================================
+
         if (!order) {
             return res.status(404).json({ error: 'Order not found' });
         }
@@ -319,11 +338,12 @@ const getChatOrdersByVendor = async (req, res) => {
             });
         }
 
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, dateField } = req.query;
         let dateMatch = {};
         if (startDate && endDate) {
+            const field = dateField || 'createdAt';
             dateMatch = {
-                createdAt: {
+                [field]: {
                     $gte: new Date(startDate),
                     $lte: new Date(endDate)
                 }
@@ -397,7 +417,8 @@ const getChatOrdersByVendor = async (req, res) => {
                         driverEarningStatus: "$driverEarningStatus",
                         floatingCashStatus: "$floatingCashStatus",
                         floatingCashAmount: "$floatingCashAmount",
-                        deliveredAt: "$deliveredAt"
+                        deliveredAt: "$deliveredAt",
+                        vendorBillFile: "$vendorBillFile"
                     }
                 }
             },
@@ -414,6 +435,7 @@ const getChatOrdersByVendor = async (req, res) => {
                     paymentStatus: "$_id.paymentStatus",
                     products: "$_id.products",
                     createdAt: "$_id.createdAt",
+                    deliveredAt: "$_id.deliveredAt", // Added deliveredAt
                     is_new: "$_id.is_new",
                     orderMessage: "$_id.orderMessage",
                     totalAmount: "$_id.totalAmount",
@@ -424,6 +446,7 @@ const getChatOrdersByVendor = async (req, res) => {
                     driverEarningStatus: "$_id.driverEarningStatus",
                     floatingCashStatus: "$_id.floatingCashStatus",
                     floatingCashAmount: "$_id.floatingCashAmount",
+                    vendorBillFile: "$_id.vendorBillFile",
                     deliveredAt: "$_id.deliveredAt",
                     vendors: {
                         vendor: "$_id.vendor",

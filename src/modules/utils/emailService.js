@@ -192,3 +192,32 @@ exports.sendNewChatOrderPaymentNotificationEmail = async (customerEmail, orderDe
         throw error;
     }
 };
+
+exports.sendVendorBlockEmail = async (vendorEmail, vendorName) => {
+    const mailOptions = {
+        from: process.env.EMAIL,
+        to: vendorEmail,
+        subject: 'Account Temporarily Blocked - SevaBazar',
+        html: `
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+                <h2 style="color: #FF3B30;">Account Temporarily Blocked</h2>
+                <p>Hello <strong>${vendorName}</strong>,</p>
+                <p>Your SevaBazar vendor account has been temporarily blocked for today because you have rejected 3 orders.</p>
+                <p><strong>Why this happened?</strong><br>
+                To ensure a great experience for our customers, we monitor order rejection rates. 3 rejections in a single day trigger an automatic temporary block.</p>
+                <p><strong>When will I be unblocked?</strong><br>
+                Your account will be automatically unblocked at <strong>12:00 AM tonight IST</strong>. You will be able to receive orders again tomorrow.</p>
+                <p>If you have any questions, please contact SevaBazar Support.</p>
+                <br>
+                <p>Regards,<br>Team SevaBazar</p>
+            </div>
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log(`Block notification email sent to vendor: ${vendorEmail}`);
+    } catch (error) {
+        console.error('Error sending vendor block email:', error);
+    }
+};
