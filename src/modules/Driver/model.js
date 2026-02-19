@@ -40,14 +40,6 @@ const driverSchema = new Schema({
         enum: ["approved", "suspended"],
         default: "approved",
     },
-    walletBalance: {
-        type: Number,
-        default: 0,
-    },
-    floatingCash: {
-        type: Number,
-        default: 0,
-    },
     floatingCashLimit: {
         type: Number,
         default: 2000,
@@ -79,6 +71,15 @@ const driverSchema = new Schema({
     role: {
         type: String,
         default: "driver",
+    },
+    deviceToken: {
+        type: String,
+        default: null,
+    },
+    deviceType: {
+        type: String,
+        enum: ["android", "ios", null],
+        default: null,
     },
     createdAt: {
         type: Date,

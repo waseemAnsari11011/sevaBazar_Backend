@@ -103,7 +103,7 @@ exports.createDriver = async (req, res) => {
 
 exports.driverLogin = async (req, res) => {
     try {
-        const { phone, password } = req.body;
+        const { phone, password, deviceToken, deviceType } = req.body;
 
         const driver = await Driver.findOne({ "personalDetails.phone": phone });
         if (!driver) {
@@ -125,8 +125,12 @@ exports.driverLogin = async (req, res) => {
             { expiresIn: "7d" }
         );
 
-        // Set driver online status to true upon successful login
-        await Driver.findByIdAndUpdate(driver._id, { isOnline: true });
+        // Set driver online status to true upon successful login and save device info
+        await Driver.findByIdAndUpdate(driver._id, {
+            isOnline: true,
+            deviceToken: deviceToken || driver.deviceToken,
+            deviceType: deviceType || driver.deviceType
+        });
 
         res.status(200).json({
             message: "Login successful",
@@ -137,6 +141,7 @@ exports.driverLogin = async (req, res) => {
                 phone: driver.personalDetails.phone,
                 role: driver.role,
                 isOnline: true, // Echo back the status
+                deviceToken: deviceToken || driver.deviceToken,
             },
         });
     } catch (error) {
@@ -326,7 +331,8 @@ exports.findNearestDrivers = async (req, res) => {
                 isOnline: d.isOnline,
                 approvalStatus: d.approvalStatus,
                 isFree: d.currentOrderId === null
-            }
+            },
+            deviceToken: d.deviceToken
         }));
 
         // Resolve DB ObjectId and fetch ORDER DETAILS for full notification
@@ -469,6 +475,28 @@ exports.findNearestDrivers = async (req, res) => {
                         totalDistance: driverTotalDistance,
                         earning: driverEarning
                     });
+                }
+
+                // Send Push Notification for Ringtone/Background wake-up
+                console.log(`[PUSH] Checking token for ${driver.name}: ${driver.deviceToken || 'No Token'}`);
+                if (driver.deviceToken) {
+                    try {
+                        const pushTitle = "New Order Available! 📦";
+                        const pushBody = `New order from ${fullOfferData.vendorName}. Earning: ₹${driverEarning}`;
+                        const pushData = {
+                            type: 'new_order',
+                            orderId: orderId.toString(),
+                            earning: driverEarning.toString(),
+                            vendorName: fullOfferData.vendorName || 'Vendor',
+                            pickupLocation: JSON.stringify(fullOfferData.pickupLocation),
+                            dropLocation: JSON.stringify(fullOfferData.dropLocation)
+                        };
+                        sendPushNotification(driver.deviceToken, pushTitle, pushBody, pushData)
+                            .then(res => console.log(`[PUSH] Success for ${driver.name}:`, res))
+                            .catch(err => console.error(`[PUSH] Send Error for ${driver.name}:`, err.message));
+                    } catch (pushErr) {
+                        console.error("[PUSH] Prep Error:", pushErr.message);
+                    }
                 }
             }
         }
@@ -997,16 +1025,17 @@ exports.getWalletBalance = async (req, res) => {
         }, 0);
 
         const totalFloatingCash = calcFloatingCash(pendingCashRegular, false) + calcFloatingCash(pendingCashChat, true);
+        const totalOverdueAmount = calcFloatingCash(overdueRegular, false) + calcFloatingCash(overdueChat, true);
 
-        // Calculate real-time Pending Earnings (Available Balance - Only for Delivered orders)
-        const pendingEarningsRegular = await Order.find({
+        // Calculate real-time Paid Earnings (Available Balance - Only for Delivered orders)
+        const paidEarningsRegular = await Order.find({
             driverId: driverId,
-            driverEarningStatus: 'Pending',
+            driverEarningStatus: 'Paid',
             deliveredAt: { $ne: null }
         });
-        const pendingEarningsChat = await ChatOrder.find({
+        const paidEarningsChat = await ChatOrder.find({
             driverId: driverId,
-            driverEarningStatus: 'Pending',
+            driverEarningStatus: 'Paid',
             deliveredAt: { $ne: null }
         });
 
@@ -1025,16 +1054,17 @@ exports.getWalletBalance = async (req, res) => {
             return sum + earning;
         }, 0);
 
-        const totalPendingEarnings = calcEarnings(pendingEarningsRegular) + calcEarnings(pendingEarningsChat);
+        const totalPaidEarnings = calcEarnings(paidEarningsRegular) + calcEarnings(paidEarningsChat);
 
         res.status(200).json({
             success: true,
-            balance: totalPendingEarnings, // Use calculated sum instead of static field
+            balance: totalPaidEarnings, // Show only cleared (Paid) earnings
             floatingCash: totalFloatingCash, // Use calculated sum instead of static field
             floatingCashLimit: driver.floatingCashLimit || 2000,
             isOnline: driver.isOnline || false,
             isPaymentOverdue: overdueOrdersCount > 0,
-            overdueCount: overdueOrdersCount
+            overdueCount: overdueOrdersCount,
+            overdueAmount: totalOverdueAmount
         });
 
     } catch (error) {
@@ -1114,6 +1144,7 @@ exports.getActiveOrder = async (req, res) => {
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
+                    vendorPhone: vendor?.vendorInfo?.contactNumber || 'N/A',
                     dropLocation: {
                         latitude: order.shippingAddress.latitude,
                         longitude: order.shippingAddress.longitude
@@ -1163,6 +1194,7 @@ exports.getActiveOrder = async (req, res) => {
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
+                    vendorPhone: vendor?.vendorInfo?.contactNumber || 'N/A',
                     dropLocation: {
                         latitude: order.shippingAddress.latitude,
                         longitude: order.shippingAddress.longitude
@@ -1248,6 +1280,7 @@ exports.getDriverOrders = async (req, res) => {
                         longitude: vendor.location.coordinates[0]
                     } : null,
                     vendorName: vendor?.name || 'Vendor',
+                    vendorPhone: vendor?.phone || 'N/A',
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
@@ -1308,6 +1341,7 @@ exports.getDriverOrders = async (req, res) => {
                         longitude: vendor.location.coordinates[0]
                     } : null,
                     vendorName: vendor?.name || 'Vendor',
+                    vendorPhone: vendor?.phone || 'N/A',
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
@@ -1411,14 +1445,29 @@ exports.getDriverOrders = async (req, res) => {
 exports.getCompletedOrders = async (req, res) => {
     try {
         const { driverId } = req.params;
+        const { startDate, endDate } = req.query; // Extract date filters
         const Order = require('../Order/model');
         const ChatOrder = require('../ChatOrdrer/model');
 
-        // Fetch regular completed orders
+        // Build date filter query if dates are provided
+        let dateFilter = {};
+        if (startDate && endDate) {
+            dateFilter = {
+                deliveredAt: {
+                    $gte: new Date(startDate),
+                    $lte: new Date(endDate)
+                }
+            };
+        }
+
+        // Fetch regular completed orders with date filter
         const completedOrders = await Order.find({
             driverId: driverId,
-            'vendors.orderStatus': 'Delivered'
-        }).sort({ updatedAt: -1 });
+            'vendors.orderStatus': 'Delivered',
+            ...dateFilter
+        }).sort({ deliveredAt: -1 });
+
+        console.log(`[DEBUG] Found ${completedOrders.length} regular completed orders`);
 
         const Settings = require('../Settings/model');
         let settings = await Settings.findOne();
@@ -1435,18 +1484,24 @@ exports.getCompletedOrders = async (req, res) => {
             return {
                 orderId: order.orderId,
                 earning: earning,
-                date: order.updatedAt,
+                earningStatus: order.driverEarningStatus || 'Pending',
+                floatingCashAmount: order.floatingCashAmount || 0,
+                floatingCashStatus: order.floatingCashStatus || 'Pending',
+                date: order.deliveredAt || order.updatedAt, // Fallback to updatedAt if deliveredAt is missing
                 customerName: order.shippingAddress?.name || order.name,
                 address: order.shippingAddress?.address || 'N/A',
                 isChatOrder: false
             };
         });
 
-        // Fetch completed chat orders
+        // Fetch completed chat orders with date filter
         const completedChatOrders = await ChatOrder.find({
             driverId: driverId,
-            orderStatus: 'Delivered'
-        }).sort({ updatedAt: -1 });
+            orderStatus: 'Delivered',
+            ...dateFilter
+        }).sort({ deliveredAt: -1 });
+
+        console.log(`[DEBUG] Found ${completedChatOrders.length} chat completed orders`);
 
         const mappedChatHistory = completedChatOrders.map(order => {
             let earning = order.driverDeliveryFee?.totalFee;
@@ -1458,13 +1513,17 @@ exports.getCompletedOrders = async (req, res) => {
             return {
                 orderId: order.orderId,
                 earning: earning,
-                date: order.updatedAt,
+                earningStatus: order.driverEarningStatus || 'Pending',
+                floatingCashAmount: order.floatingCashAmount || 0,
+                floatingCashStatus: order.floatingCashStatus || 'Pending',
+                date: order.deliveredAt || order.updatedAt, // Fallback to updatedAt
                 customerName: order.shippingAddress?.name || order.name,
                 address: order.shippingAddress?.address || 'N/A',
                 isChatOrder: true
             };
         });
 
+        // Combine and sort
         const finalHistory = [...mappedHistory, ...mappedChatHistory].sort((a, b) => new Date(b.date) - new Date(a.date));
 
         res.status(200).json({

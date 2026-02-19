@@ -20,6 +20,9 @@ router.put("/profile", authenticateToken, vendorController.updateVendorProfile);
 // Update own vendor address
 router.put("/address/:vendorId", vendorController.updateVendorAddress);
 
+// Save device token for push notifications
+router.post("/save-device-token", vendorController.saveDeviceToken);
+
 // Delete own vendor account (optional - might want admin-only)
 // router.delete("/:id", vendorController.deleteVendor);
 

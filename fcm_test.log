@@ -1,0 +1,44 @@
+[2026-02-15T15:36:06.889Z] Starting Standalone Firebase Test...
+[2026-02-15T15:36:06.891Z] Project ID: sevabazar-5d3f6
+[2026-02-15T15:36:06.892Z] Client Email: firebase-adminsdk-19c0k@sevabazar-5d3f6.iam.gserviceaccount.com
+[2026-02-15T15:36:06.957Z] SDK Initialized. Attempting to fetch access token...
+[2026-02-15T15:36:06.958Z] CRITICAL FAILURE: Cannot read properties of undefined (reading 'getAccessToken')
+[2026-02-15T15:36:06.961Z] TypeError: Cannot read properties of undefined (reading 'getAccessToken')
+    at testFirebase (C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\test_fcm.js:43:51)
+    at Object.<anonymous> (C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\test_fcm.js:54:1)
+    at Module._compile (node:internal/modules/cjs/loader:1761:14)
+    at Object..js (node:internal/modules/cjs/loader:1893:10)
+    at Module.load (node:internal/modules/cjs/loader:1481:32)
+    at Module._load (node:internal/modules/cjs/loader:1300:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+[2026-02-15T15:36:25.670Z] Starting Standalone Firebase Test...
+[2026-02-15T15:36:25.672Z] Project ID: sevabazar-5d3f6
+[2026-02-15T15:36:25.673Z] Client Email: firebase-adminsdk-19c0k@sevabazar-5d3f6.iam.gserviceaccount.com
+[2026-02-15T15:36:25.720Z] SDK Initialized. Attempting to fetch access token...
+[2026-02-15T15:36:25.722Z] CRITICAL FAILURE: admin.app(...).getAccessToken is not a function
+[2026-02-15T15:36:25.723Z] TypeError: admin.app(...).getAccessToken is not a function
+    at testFirebase (C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\test_fcm.js:43:41)
+    at Object.<anonymous> (C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\test_fcm.js:54:1)
+    at Module._compile (node:internal/modules/cjs/loader:1761:14)
+    at Object..js (node:internal/modules/cjs/loader:1893:10)
+    at Module.load (node:internal/modules/cjs/loader:1481:32)
+    at Module._load (node:internal/modules/cjs/loader:1300:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+[2026-02-15T15:36:53.065Z] Starting Standalone Firebase Test...
+[2026-02-15T15:36:53.067Z] Project ID: sevabazar-5d3f6
+[2026-02-15T15:36:53.068Z] Client Email: firebase-adminsdk-19c0k@sevabazar-5d3f6.iam.gserviceaccount.com
+[2026-02-15T15:36:53.141Z] SDK Initialized. Attempting to send a dummy message (dryRun)...
+[2026-02-15T15:36:53.618Z] FAILURE: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+[2026-02-15T15:36:53.619Z] Code: app/invalid-credential
+[2026-02-16T05:36:13.287Z] Starting Standalone Firebase Test...
+[2026-02-16T05:36:13.294Z] Project ID: sevabazar-5d3f6
+[2026-02-16T05:36:13.295Z] Client Email: firebase-adminsdk-19c0k@sevabazar-5d3f6.iam.gserviceaccount.com
+[2026-02-16T05:36:13.365Z] SDK Initialized. Attempting to send a dummy message (dryRun)...
+[2026-02-16T05:36:13.836Z] FAILURE: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+[2026-02-16T05:36:13.836Z] Code: app/invalid-credential

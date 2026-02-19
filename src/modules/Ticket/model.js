@@ -4,7 +4,20 @@ const ticketSchema = new mongoose.Schema({
   customer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Customer',
+  },
+  vendor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor',
+  },
+  driver: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Driver',
+  },
+  userType: {
+    type: String,
+    enum: ['Customer', 'Vendor', 'Driver'],
     required: true,
+    default: 'Customer'
   },
   status: {
     type: String,

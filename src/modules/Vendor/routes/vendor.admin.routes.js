@@ -47,6 +47,9 @@ router.put("/restrict/:id", vendorController.restrictVendor);
 // UnRestrict Vendor
 router.put("/unrestrict/:id", vendorController.unRestrictVendor);
 
+// Unblock Vendor (Manual - Auto-block reset)
+router.put("/unblock/:id", vendorController.unblockVendor);
+
 // Admin login as vendor
 router.post("/login-as-vendor/:vendorId", vendorController.adminLoginAsVendor);
 

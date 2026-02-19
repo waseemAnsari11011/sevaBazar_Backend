@@ -1,0 +1,210 @@
+
+
+[2026-02-15T15:33:46.511Z] Order 919322: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-15T15:33:46.513Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-15T15:33:46.870Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-15T15:33:58.977Z] Order 423194: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-15T15:33:58.978Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-15T15:33:59.210Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-15T15:35:45.359Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-15T15:35:45.452Z] Firebase Admin Initialized Successfully.
+
+[2026-02-15T15:36:20.675Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-15T15:36:20.721Z] Firebase Admin Initialized Successfully.
+
+[2026-02-15T15:36:47.822Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-15T15:36:47.872Z] Firebase Admin Initialized Successfully.
+
+[2026-02-15T16:10:17.144Z] Order 535061: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-15T16:10:17.146Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-15T16:10:17.395Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-15T16:10:33.276Z] Order 534439: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-15T16:10:33.277Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-15T16:10:33.673Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-15T16:13:59.069Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-15T16:13:59.159Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T04:49:31.309Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T04:49:31.415Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T05:57:52.447Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T05:57:52.524Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T05:59:13.115Z] Order 553329: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-16T05:59:13.118Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-16T05:59:13.357Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T06:01:41.194Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T06:01:41.275Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T06:03:05.425Z] Order 334533: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-16T06:03:05.427Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-16T06:03:05.659Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T06:05:28.454Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T06:05:28.506Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T06:06:22.083Z] Order 471173: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-16T06:06:22.084Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-16T06:06:22.414Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T06:07:14.224Z] Order 839156: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-16T06:07:14.225Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-16T06:07:14.474Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T06:30:26.094Z] Order 488745: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-16T06:30:26.095Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-16T06:30:26.312Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T06:30:59.690Z] Order 261853: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-16T06:30:59.691Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-16T06:30:59.932Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T06:51:36.230Z] Order 795863: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-16T06:51:36.232Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-16T06:51:36.459Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T08:28:16.044Z] Attempting FCM to: d72f6qvTST... Type: new_order
+[2026-02-16T08:28:16.280Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T08:28:21.831Z] Attempting FCM to: d72f6qvTST... Type: new_order
+[2026-02-16T08:28:22.049Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-16T09:09:58.583Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T09:09:58.668Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T09:10:06.672Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T09:10:06.723Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T10:41:37.275Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T10:41:37.355Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T10:47:45.598Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T10:47:45.658Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T10:56:57.588Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T10:56:57.649Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T11:00:35.842Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T11:00:35.880Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T12:07:53.795Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T12:07:53.909Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T12:29:15.682Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T12:29:15.776Z] Firebase Admin Initialized Successfully.
+
+[2026-02-16T12:33:27.951Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-16T12:33:28.023Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T04:29:50.776Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T04:29:50.864Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:50:22.023Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:50:22.116Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:50:31.369Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:50:31.424Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:50:32.960Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:50:33.005Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:50:44.906Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:50:44.961Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:50:57.016Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:50:57.078Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:50:58.366Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:50:58.408Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:51:32.087Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:51:32.167Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:52:17.535Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:52:17.589Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T05:53:00.536Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T05:53:00.615Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T06:01:34.095Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T06:01:34.168Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T06:01:45.370Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T06:01:45.426Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T06:02:17.216Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T06:02:17.291Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T06:27:32.465Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T06:27:32.541Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T06:33:12.124Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T06:33:12.264Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T07:51:53.074Z] Attempting FCM to: ch0-A3tpR-... Type: new_order
+[2026-02-17T07:51:53.357Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-17T07:51:55.193Z] Attempting FCM to: ch0-A3tpR-... Type: new_order
+[2026-02-17T07:51:55.310Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-17T08:02:08.584Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T08:02:08.734Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T08:02:15.404Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T08:02:15.473Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T08:43:53.212Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T08:43:53.385Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T09:39:57.368Z] Order 248499: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-17T09:39:57.376Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-17T09:39:57.666Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-17T10:12:08.171Z] Order 992120: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-02-17T10:12:08.192Z] Attempting FCM to: f4b0fI2ETd... Type: new_order
+[2026-02-17T10:12:08.484Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-17T10:13:46.055Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T10:13:46.185Z] Firebase Admin Initialized Successfully.
+
+[2026-02-17T10:15:59.634Z] Attempting FCM to: ch0-A3tpR-... Type: new_order
+[2026-02-17T10:15:59.905Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-17T11:28:57.497Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-17T11:28:57.605Z] Firebase Admin Initialized Successfully.
+
+[2026-02-18T04:51:30.517Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-18T04:51:30.581Z] Firebase Admin Initialized Successfully.
+
+[2026-02-18T05:03:09.060Z] Attempting FCM to: ewzczpa-Q6... Type: new_order
+[2026-02-18T05:03:09.355Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-18T05:10:21.180Z] Attempting FCM to: ewzczpa-Q6... Type: new_order
+[2026-02-18T05:10:21.418Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-18T05:10:24.451Z] Attempting FCM to: ewzczpa-Q6... Type: new_order
+[2026-02-18T05:10:24.568Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-18T05:19:08.322Z] Attempting FCM to: ewzczpa-Q6... Type: new_order
+[2026-02-18T05:19:08.676Z] FCM Error: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+
+[2026-02-18T05:21:38.823Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-02-18T05:21:38.909Z] Firebase Admin Initialized Successfully.

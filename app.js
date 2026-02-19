@@ -39,6 +39,7 @@ app.use(
 const port = process.env.PORT || 3000;
 
 // Middleware to parse JSON bodies with increased limit
+// Middleware to parse JSON bodies with increased limit
 app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
@@ -56,6 +57,10 @@ mongoose
   })
   .then(() => {
     console.log("Connected to MongoDB:", mongoUri.replace(process.env.MONGO_PASSWORD, '****'));
+
+    // Initialize Cron Jobs
+    const initCronJobs = require('./src/scripts/cronJobs');
+    initCronJobs();
   })
   .catch((err) => console.error("Could not connect to MongoDB", err));
 
@@ -152,6 +157,6 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(port, () => {
-  console.log(`Server is running at http://localhost:${port}`);
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running at http://0.0.0.0:${port}`);
 });

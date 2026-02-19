@@ -17,11 +17,12 @@ const multerUpload = multer({
     // Accept both images and videos
     if (
       file.mimetype.startsWith("image/") ||
-      file.mimetype.startsWith("video/")
+      file.mimetype.startsWith("video/") ||
+      file.mimetype === "application/pdf"
     ) {
       cb(null, true);
     } else {
-      cb(new Error("Only image and video files are allowed"));
+      cb(new Error("Only image, video, and PDF files are allowed"));
     }
   },
   limits: {

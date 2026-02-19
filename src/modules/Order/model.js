@@ -163,6 +163,10 @@ const orderSchema = new Schema({
     type: Date,
     default: null,
   },
+  vendorBillFile: {
+    type: String,
+    default: null,
+  },
 });
 
 // Pre-save middleware to generate a unique 6-digit orderId and calculate the total amount for each product

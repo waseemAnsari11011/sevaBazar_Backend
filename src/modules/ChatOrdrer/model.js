@@ -151,6 +151,10 @@ const orderSchema = new Schema({
     razorpay_signature: {
         type: String,
     },
+    vendorBillFile: {
+        type: String,
+        default: null,
+    },
 });
 
 // Middleware to generate unique orderId and set the vendor to admin

@@ -108,8 +108,8 @@ const vendorSchema = new Schema({
   },
   status: {
     type: String,
-    enum: ["online", "offline"],
-    default: "online",
+    enum: ["online", "offline", "open", "closed"], // Added open/closed for backward compatibility
+    default: "open",
   },
   address: {
     addressLine1: String,
@@ -171,6 +171,28 @@ const vendorSchema = new Schema({
   isDeleted: {
     type: Boolean,
     default: false,
+  },
+
+  // --- Blocking Logic ---
+  rejectionCount: {
+    type: Number,
+    default: 0,
+  },
+  isBlocked: {
+    type: Boolean,
+    default: false,
+  },
+  blockedAt: {
+    type: Date,
+  },
+  lastRejectionResetDate: {
+    type: Date,
+    default: Date.now,
+  },
+
+  // --- Notification ---
+  deviceToken: {
+    type: String,
   },
 
   // --- Password Reset ---
