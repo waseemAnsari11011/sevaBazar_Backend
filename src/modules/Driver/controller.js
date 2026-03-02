@@ -7,6 +7,27 @@ const Customer = require('../Customer/model');
 const { sendPushNotification } = require('../utils/pushNotificationUtil');
 const { calculateDistance, calculateDeliveryFee } = require('../Driver/pricingUtil');
 
+// Helper to get Midnight IST in UTC
+const getISTMidnight = () => {
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(now.getTime() + istOffset);
+    const startOfTodayIST = new Date(istNow);
+    startOfTodayIST.setUTCHours(0, 0, 0, 0);
+    const deadlineUTC = new Date(startOfTodayIST.getTime() - istOffset);
+    return { deadlineUTC, startOfTodayIST, now };
+};
+
+// Generic isSameDay check for IST reset consistency
+const isSameDayIST = (d1, d2) => {
+    if (!d1 || !d2) return false;
+    const date1 = new Date(d1);
+    const date2 = new Date(d2);
+    return date1.getUTCDate() === date2.getUTCDate() &&
+        date1.getUTCMonth() === date2.getUTCMonth() &&
+        date1.getUTCFullYear() === date2.getUTCFullYear();
+};
+
 // Helper to enrich order items with images and calculate total for driver
 const enrichItemsAndTotal = (orderData, isChatOrder) => {
     const rawItems = isChatOrder ? (orderData.products || []) : (orderData.vendors?.[0]?.products || []);
@@ -119,6 +140,10 @@ exports.driverLogin = async (req, res) => {
             return res.status(403).json({ message: "Your account is suspended. Please contact admin." });
         }
 
+        if (driver.isBlocked) {
+            return res.status(403).json({ message: "Your account is blocked due to multiple rejections. Please contact support." });
+        }
+
         const token = jwt.sign(
             { id: driver._id, role: driver.role },
             secret,
@@ -188,14 +213,84 @@ exports.updateDriverStatus = async (req, res) => {
     }
 };
 
+// Admin: manually unblock a driver blocked due to rejections
+exports.unblockDriver = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const driver = await Driver.findByIdAndUpdate(
+            id,
+            {
+                isBlocked: false,
+                blockedAt: null,
+                rejectionCount: 0,
+                lastRejectionResetAt: new Date(),
+            },
+            { new: true }
+        );
+        if (!driver) {
+            return res.status(404).json({ message: "Driver not found" });
+        }
+
+        // Clear all rejected assignments so "Rejected" tab appears empty
+        const OrderAssignment = require('./orderAssignment.model');
+        await OrderAssignment.deleteMany({ driverId: id, status: 'rejected' });
+
+        console.log(`[UNBLOCK] Driver ${id} manually unblocked by admin. Rejected assignments cleared.`);
+        res.status(200).json({ success: true, message: "Driver unblocked successfully", driver });
+    } catch (error) {
+        console.error("Error unblocking driver:", error);
+        res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+};
+
 exports.updateOnlineStatus = async (req, res) => {
     try {
         const { isOnline } = req.body;
         const driverId = req.user.id;
 
+        const updateData = { isOnline };
+        const Order = require('../Order/model');
+        const ChatOrder = require('../ChatOrdrer/model');
+        const { deadlineUTC, startOfTodayIST, now } = getISTMidnight();
+
+        if (isOnline) {
+            // Only update lastOnlineAt if they were previously offline,
+            // to avoid resetting the "live" ticker on every foreground/refresh.
+            const driver = await Driver.findById(driverId);
+            if (driver && !driver.isOnline) {
+                console.log(`[ONLINE_TIME] Driver ${driverId} going online at ${now.toISOString()}`);
+                updateData.lastOnlineAt = now;
+            } else if (driver && !driver.lastOnlineAt) {
+                // Sanity: if online but missing timestamp, set it
+                updateData.lastOnlineAt = now;
+            }
+        } else {
+            const driver = await Driver.findById(driverId);
+            if (driver && driver.lastOnlineAt) {
+                const lastOnlineAt = new Date(driver.lastOnlineAt);
+
+                // If session started before midnight IST, only count from midnight IST
+                const effectiveStart = lastOnlineAt < deadlineUTC ? deadlineUTC : lastOnlineAt;
+                const duration = now.getTime() - effectiveStart.getTime();
+
+                // If it's a new day since last tracking OR if data is corrupted (>24h), reset bucket
+                const lastReset = driver.lastOnlineResetAt ? new Date(driver.lastOnlineResetAt) : null;
+                const isNewDay = !isSameDayIST(lastReset, startOfTodayIST);
+                const isInvalidTotal = (driver.totalOnlineTimeToday || 0) > 24 * 60 * 60 * 1000;
+
+                const currentTotal = (isNewDay || isInvalidTotal) ? 0 : (driver.totalOnlineTimeToday || 0);
+
+                updateData.totalOnlineTimeToday = currentTotal + (duration > 0 ? duration : 0);
+                updateData.lastOnlineAt = null;
+                updateData.lastOnlineResetAt = startOfTodayIST;
+
+                console.log(`[ONLINE_TIME] Driver ${driverId} going offline. Session: ${duration}ms, New Total: ${updateData.totalOnlineTimeToday}ms`);
+            }
+        }
+
         const driver = await Driver.findByIdAndUpdate(
             driverId,
-            { isOnline },
+            updateData,
             { new: true }
         );
 
@@ -206,6 +301,8 @@ exports.updateOnlineStatus = async (req, res) => {
         res.status(200).json({
             message: `Driver is now ${isOnline ? "online" : "offline"}`,
             isOnline: driver.isOnline,
+            lastOnlineAt: driver.lastOnlineAt,
+            totalOnlineTimeToday: driver.totalOnlineTimeToday
         });
     } catch (error) {
         console.error("Error updating online status:", error);
@@ -390,6 +487,9 @@ exports.findNearestDrivers = async (req, res) => {
                         longitude: firstVendor.location.coordinates[0]
                     } : null,
                     vendorName: firstVendor?.name || 'Vendor',
+                    businessName: firstVendor?.vendorInfo?.businessName || firstVendor?.name || 'Vendor',
+                    vendorShopPhoto: (firstVendor?.documents?.shopPhoto && firstVendor.documents.shopPhoto.length > 0) ? firstVendor.documents.shopPhoto[0] : null,
+                    vendorPhone: firstVendor?.vendorInfo?.contactNumber || 'N/A',
                     vendorAddress: firstVendor?.location?.address ?
                         (typeof firstVendor.location.address === 'string' ? firstVendor.location.address : `${firstVendor.location.address.addressLine1 || ''}, ${firstVendor.location.address.city || ''}`) :
                         'Vendor Address',
@@ -488,6 +588,9 @@ exports.findNearestDrivers = async (req, res) => {
                             orderId: orderId.toString(),
                             earning: driverEarning.toString(),
                             vendorName: fullOfferData.vendorName || 'Vendor',
+                            businessName: fullOfferData.businessName || fullOfferData.vendorName || 'Vendor',
+                            vendorShopPhoto: fullOfferData.vendorShopPhoto || '',
+                            vendorPhone: fullOfferData.vendorPhone || 'N/A',
                             pickupLocation: JSON.stringify(fullOfferData.pickupLocation),
                             dropLocation: JSON.stringify(fullOfferData.dropLocation)
                         };
@@ -731,6 +834,31 @@ exports.verifyPickup = async (req, res) => {
         console.log(`[AUTO DELIVERY OTP] OTP Generated: ${deliveryOtp}`);
         console.log(`************************************\n`);
 
+        // Emit socket event to vendor room for real-time refresh
+        const io = req.app.get('io');
+        if (io) {
+            if (isChatOrder) {
+                if (order.vendor) {
+                    console.log(`[SOCKET] Emitting order_status_update (Shipped) to vendor: ${order.vendor}`);
+                    io.to(order.vendor.toString()).emit('order_status_update', {
+                        orderId: order._id.toString(),
+                        status: 'Shipped'
+                    });
+                }
+            } else {
+                order.vendors.forEach(v => {
+                    const vId = v.vendor._id || v.vendor;
+                    if (vId) {
+                        console.log(`[SOCKET] Emitting order_status_update (Shipped) to vendor: ${vId}`);
+                        io.to(vId.toString()).emit('order_status_update', {
+                            orderId: order._id.toString(),
+                            status: 'Shipped'
+                        });
+                    }
+                });
+            }
+        }
+
         res.status(200).json({
             success: true,
             message: 'Pickup verified successfully. Order is now out for delivery.',
@@ -929,6 +1057,31 @@ exports.completeDelivery = async (req, res) => {
 
         console.log(`Order ${orderId} delivered by driver ${driverId}. Earned: ₹${deliveryFee}`);
 
+        // Emit socket event to vendor room for real-time refresh
+        const io = req.app.get('io');
+        if (io) {
+            if (isChatOrder) {
+                if (order.vendor) {
+                    console.log(`[SOCKET] Emitting order_status_update (Delivered) to vendor: ${order.vendor}`);
+                    io.to(order.vendor.toString()).emit('order_status_update', {
+                        orderId: order._id.toString(),
+                        status: 'Delivered'
+                    });
+                }
+            } else {
+                order.vendors.forEach(v => {
+                    const vId = v.vendor._id || v.vendor;
+                    if (vId) {
+                        console.log(`[SOCKET] Emitting order_status_update (Delivered) to vendor: ${vId}`);
+                        io.to(vId.toString()).emit('order_status_update', {
+                            orderId: order._id.toString(),
+                            status: 'Delivered'
+                        });
+                    }
+                });
+            }
+        }
+
         res.status(200).json({
             success: true,
             message: 'Delivery completed successfully!',
@@ -961,16 +1114,7 @@ exports.getWalletBalance = async (req, res) => {
         // ===== 12:00 AM IST Deadline Logic =====
         const Order = require('../Order/model');
         const ChatOrder = require('../ChatOrdrer/model');
-
-        // Calculate Start of Today in IST (India Standard Time: UTC+5:30)
-        const now = new Date();
-        const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 mins in ms
-        const istNow = new Date(now.getTime() + istOffset);
-        const startOfTodayIST = new Date(istNow);
-        startOfTodayIST.setUTCHours(0, 0, 0, 0); // Midnight in IST
-
-        // Convert IST Midnight back to UTC for DB comparison
-        const deadlineUTC = new Date(startOfTodayIST.getTime() - istOffset);
+        const { deadlineUTC, startOfTodayIST, now } = getISTMidnight();
 
         // Find any order from previous days that is still 'Pending'
         const overdueRegular = await Order.find({
@@ -1045,26 +1189,96 @@ exports.getWalletBalance = async (req, res) => {
         if (!settings) settings = { driverDeliveryFee: { basePay: 30, baseDistance: 5, perKmRate: 10 } };
         const { calculateDeliveryFee } = require('./pricingUtil');
 
+        // Note: Driver Earnings logic
         const calcEarnings = (orders) => orders.reduce((sum, order) => {
             let earning = order.driverDeliveryFee?.totalFee;
             if (earning === undefined || earning === null || earning === 0) {
-                const feeInfo = calculateDeliveryFee(order.distance || 0, settings);
-                earning = feeInfo.amount || 0;
+                // If driverDeliveryFee is missing, fallback to base formula, DO NOT use calculateDeliveryFee as it's for customers
+                const distance = order.distance || 0;
+                // Basic fallback logic matching calculateDriverDeliveryFee
+                const { basePay = 30, baseDistance = 5, perKmRate = 10 } = settings.driverDeliveryFee || {};
+                let fallbackEarning = basePay;
+                if (distance > baseDistance) {
+                    fallbackEarning += (distance - baseDistance) * perKmRate;
+                }
+                earning = fallbackEarning;
             }
             return sum + earning;
         }, 0);
 
         const totalPaidEarnings = calcEarnings(paidEarningsRegular) + calcEarnings(paidEarningsChat);
 
+        // ===== Today's Progress Logic =====
+        const todayRegular = await Order.find({
+            driverId: driverId,
+            'vendors.orderStatus': 'Delivered',
+            deliveredAt: { $gte: deadlineUTC }
+        });
+        const todayChat = await ChatOrder.find({
+            driverId: driverId,
+            orderStatus: 'Delivered',
+            deliveredAt: { $gte: deadlineUTC }
+        });
+
+        const todayOrdersCount = todayRegular.length + todayChat.length;
+        const todayEarnings = calcEarnings(todayRegular) + calcEarnings(todayChat);
+
+        // ===== Online Time Logic (HH:mm h format) =====
+        let totalMs = driver.totalOnlineTimeToday || 0;
+        const lastReset = driver.lastOnlineResetAt ? new Date(driver.lastOnlineResetAt) : null;
+
+        // Reset if it's a new day (IST) OR if data is corrupted (> 24h)
+        const isNewDay = !isSameDayIST(lastReset, startOfTodayIST);
+        const isInvalidTotal = totalMs > 24 * 60 * 60 * 1000; // Sanity check
+
+        if (isNewDay || isInvalidTotal) {
+            console.log(`[ONLINE_TIME] Resetting totalMs for ${driverId}. isNewDay: ${isNewDay}, isInvalidTotal: ${isInvalidTotal}`);
+            totalMs = 0;
+            await Driver.findByIdAndUpdate(driverId, {
+                totalOnlineTimeToday: 0,
+                lastOnlineResetAt: startOfTodayIST
+            });
+        }
+
+        if (driver.isOnline) {
+            if (driver.lastOnlineAt) {
+                const lastOnlineAt = new Date(driver.lastOnlineAt);
+                // If session started before midnight IST, only count from midnight IST
+                const effectiveStart = lastOnlineAt < deadlineUTC ? deadlineUTC : lastOnlineAt;
+                const currentSession = now.getTime() - effectiveStart.getTime();
+                totalMs += (currentSession > 0 ? currentSession : 0);
+
+                console.log(`[ONLINE_TIME] Driver ${driverId} is online. Session start: ${lastOnlineAt.toISOString()}, Current partial: ${currentSession}ms, Total: ${totalMs}ms`);
+            } else {
+                // Sanity: if online but missing timestamp, set it to now to start recording
+                console.log(`[ONLINE_TIME] Driver ${driverId} is online but missing lastOnlineAt. Setting to now.`);
+                await Driver.findByIdAndUpdate(driverId, { lastOnlineAt: now });
+            }
+        } else {
+            console.log(`[ONLINE_TIME] Driver ${driverId} is offline. Total bucket: ${totalMs}ms`);
+        }
+
+        const formatOnlineTime = (ms) => {
+            const totalMinutes = Math.floor(ms / 60000);
+            if (totalMinutes < 60) return `${totalMinutes}m`;
+            const h = Math.floor(totalMinutes / 60);
+            const m = totalMinutes % 60;
+            return `${h}h ${m < 10 ? '0' + m : m}m`;
+        };
+
         res.status(200).json({
             success: true,
-            balance: totalPaidEarnings, // Show only cleared (Paid) earnings
-            floatingCash: totalFloatingCash, // Use calculated sum instead of static field
-            floatingCashLimit: driver.floatingCashLimit || 2000,
+            balance: totalPaidEarnings,
+            floatingCash: totalFloatingCash,
             isOnline: driver.isOnline || false,
             isPaymentOverdue: overdueOrdersCount > 0,
             overdueCount: overdueOrdersCount,
-            overdueAmount: totalOverdueAmount
+            overdueAmount: totalOverdueAmount,
+            todayEarnings: todayEarnings,
+            todayOrders: todayOrdersCount,
+            todayOnlineTime: formatOnlineTime(totalMs),
+            rejectionCount: driver.rejectionCount || 0,
+            isBlocked: driver.isBlocked || false,
         });
 
     } catch (error) {
@@ -1141,6 +1355,8 @@ exports.getActiveOrder = async (req, res) => {
                         longitude: vendor.location.coordinates[0]
                     } : null,
                     vendorName: vendor?.name || 'Vendor',
+                    businessName: vendor?.vendorInfo?.businessName || vendor?.name || 'Vendor',
+                    vendorShopPhoto: (vendor?.documents?.shopPhoto && vendor.documents.shopPhoto.length > 0) ? vendor.documents.shopPhoto[0] : null,
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
@@ -1191,6 +1407,8 @@ exports.getActiveOrder = async (req, res) => {
                         longitude: vendor.location.coordinates[0]
                     } : null,
                     vendorName: vendor?.name || 'Vendor',
+                    businessName: vendor?.vendorInfo?.businessName || vendor?.name || 'Vendor',
+                    vendorShopPhoto: (vendor?.documents?.shopPhoto && vendor.documents.shopPhoto.length > 0) ? vendor.documents.shopPhoto[0] : null,
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
@@ -1280,7 +1498,9 @@ exports.getDriverOrders = async (req, res) => {
                         longitude: vendor.location.coordinates[0]
                     } : null,
                     vendorName: vendor?.name || 'Vendor',
-                    vendorPhone: vendor?.phone || 'N/A',
+                    businessName: vendor?.vendorInfo?.businessName || vendor?.name || 'Vendor',
+                    vendorShopPhoto: (vendor?.documents?.shopPhoto && vendor.documents.shopPhoto.length > 0) ? vendor.documents.shopPhoto[0] : null,
+                    vendorPhone: vendor?.vendorInfo?.contactNumber || 'N/A',
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
@@ -1341,7 +1561,9 @@ exports.getDriverOrders = async (req, res) => {
                         longitude: vendor.location.coordinates[0]
                     } : null,
                     vendorName: vendor?.name || 'Vendor',
-                    vendorPhone: vendor?.phone || 'N/A',
+                    businessName: vendor?.vendorInfo?.businessName || vendor?.name || 'Vendor',
+                    vendorShopPhoto: (vendor?.documents?.shopPhoto && vendor.documents.shopPhoto.length > 0) ? vendor.documents.shopPhoto[0] : null,
+                    vendorPhone: vendor?.vendorInfo?.contactNumber || 'N/A',
                     vendorAddress: vendor?.location?.address ?
                         (typeof vendor.location.address === 'string' ? vendor.location.address : `${vendor.location.address.addressLine1 || ''}, ${vendor.location.address.city || ''}`) :
                         'Vendor Address',
@@ -1419,10 +1641,47 @@ exports.getDriverOrders = async (req, res) => {
                 }
             };
         }));
+        // 2b. Fetch rejected offers from OrderAssignment
+        const rejectedOffers = await OrderAssignment.find({
+            driverId: driverId,
+            status: 'rejected'
+        }).sort({ updatedAt: -1 }).limit(20);
+
+        const mappedRejected = await Promise.all(rejectedOffers.map(async (offer) => {
+            let order = await Order.findById(offer.orderId).lean();
+            let isChat = false;
+            if (!order) {
+                order = await ChatOrder.findById(offer.orderId).lean();
+                if (order) isChat = true;
+            }
+            if (!order) return null;
+
+            const vendorId = isChat ? order.vendor : order.vendors[0].vendor;
+            const vendor = await Vendor.findById(vendorId);
+
+            return {
+                orderId: order.orderId,
+                totalDistance: offer.totalDistance || offer.distance || 0,
+                earning: offer.earning || 0,
+                status: 'Rejected',
+                isOffer: false,
+                isRejected: true,
+                rejectionReason: offer.rejectionReason,
+                isChatOrder: isChat,
+                createdAt: order.createdAt,
+                updatedAt: offer.updatedAt,
+                rawOfferData: {
+                    orderId: order.orderId,
+                    vendorName: vendor?.name || 'Vendor',
+                    ...enrichItemsAndTotal(order, isChat)
+                }
+            };
+        }));
 
         // Filter out any nulls and merge
         const finalOrders = [
             ...mappedOffers.filter(o => o !== null),
+            ...mappedRejected.filter(o => o !== null),
             ...mappedActive,
             ...mappedActiveChat
         ];

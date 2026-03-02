@@ -26,6 +26,9 @@ const orderAssignmentSchema = new Schema({
     earning: {
         type: Number, // Total earning for this specific driver-offer
     },
+    rejectionReason: {
+        type: String, // Reason provided by driver if status is 'rejected'
+    },
     createdAt: {
         type: Date,
         default: Date.now,

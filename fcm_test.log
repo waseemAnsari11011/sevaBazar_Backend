@@ -42,3 +42,9 @@
 [2026-02-16T05:36:13.365Z] SDK Initialized. Attempting to send a dummy message (dryRun)...
 [2026-02-16T05:36:13.836Z] FAILURE: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
 [2026-02-16T05:36:13.836Z] Code: app/invalid-credential
+[2026-02-24T09:21:29.284Z] Starting Standalone Firebase Test...
+[2026-02-24T09:21:29.291Z] Project ID: sevabazar-5d3f6
+[2026-02-24T09:21:29.292Z] Client Email: firebase-adminsdk-19c0k@sevabazar-5d3f6.iam.gserviceaccount.com
+[2026-02-24T09:21:29.382Z] SDK Initialized. Attempting to send a dummy message (dryRun)...
+[2026-02-24T09:21:29.831Z] FAILURE: Credential implementation provided to initializeApp() via the "credential" property failed to fetch a valid Google OAuth2 access token with the following error: "Error fetching access token: invalid_grant (Invalid JWT Signature.)". There are two likely causes: (1) your server time is not properly synced or (2) your certificate key file has been revoked. To solve (1), re-sync the time on your server. To solve (2), make sure the key ID for your key file is still present at https://console.firebase.google.com/iam-admin/serviceaccounts/project. If not, generate a new key file at https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk.
+[2026-02-24T09:21:29.832Z] Code: app/invalid-credential

@@ -25,27 +25,33 @@ const sendPushNotification = async (deviceToken, title, body, data = {}) => {
     throw new Error('Device token, title, and body are required');
   }
 
-  // CRITICAL: Send ONLY data payload (no notification object)
-  // This ensures Xiaomi devices don't block the message
-  // and allows our app to handle wake-up logic directly
+  const isCriticalAlert = data.type === 'new_order' || data.type === 'NEW_ORDER_ALERT';
+
   const message = {
+    notification: {
+      title: title,
+      body: body,
+    },
     data: {
       ...data,
       title: title,
       body: body,
-      type: data.type || 'new_order', // Ensure type is always set
+      type: data.type || 'new_order',
     },
     android: {
       priority: 'high',
       ttl: 3600 * 1000, // 1 hour
-      // NO notification object - pure data message
     },
     token: deviceToken,
   };
 
+  // For critical alerts, we rely entirely on the data payload and our custom Native Service (FCMWakeUpService.kt)
+  // to avoid system-generated notifications that cannot be targeted for specific dismissal.
+  // The high priority ensures the data message is delivered immediately even in Doze mode.
+
   try {
     const fs = require('fs');
-    const logMsg = `\n[${new Date().toISOString()}] Attempting FCM to: ${deviceToken?.substring(0, 10)}... Type: ${data.type}\n`;
+    const logMsg = `\n[${new Date().toISOString()}] Attempting FCM to: ${deviceToken?.substring(0, 10)}... Type: ${data.type} (Critical: ${isCriticalAlert})\n`;
     fs.appendFileSync('fcm_debug.log', logMsg);
 
     const response = await admin.messaging().send(message);
@@ -53,7 +59,7 @@ const sendPushNotification = async (deviceToken, title, body, data = {}) => {
     const successMsg = `[${new Date().toISOString()}] FCM Success: ${response}\n`;
     fs.appendFileSync('fcm_debug.log', successMsg);
 
-    console.log(`[FCM] Data-only message sent successfully: ${response}`);
+    console.log(`[FCM] Message sent successfully: ${response} (Mode: ${isCriticalAlert ? 'Notification+Data' : 'Data-only'})`);
     return `Successfully sent message: ${response}`;
   } catch (error) {
     const errorMsg = `[${new Date().toISOString()}] FCM Error: ${error.message}\n`;

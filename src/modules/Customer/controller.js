@@ -240,18 +240,24 @@ exports.sendOtp = async (req, res) => {
 
 // Controller function to save address and available localities for a user
 exports.saveAddressAndLocalities = async (req, res) => {
+  console.log('DEBUG: Received saveAddressAndLocalities request for ID:', req.params.id);
+  console.log('DEBUG: Body:', JSON.stringify(req.body));
   try {
     const {
+      name,
+      phone,
+      houseNo,
+      plusCode,
+      locality,
+      sublocality,
+      fullAddress,
       landmark,
       city,
       state,
       country,
       postalCode,
-      name,
-      phone,
       latitude,
       longitude,
-      addressLine2,
     } = req.body;
     const { id } = req.params; // Assuming userId is passed in the URL params or request body
 
@@ -266,15 +272,19 @@ exports.saveAddressAndLocalities = async (req, res) => {
     const newAddress = {
       name,
       phone,
-      addressLine2,
+      houseNo,
+      plusCode,
+      locality,
+      sublocality,
+      fullAddress,
+      postalCode,
       landmark,
       city,
       state,
       country,
-      postalCode,
       latitude,
       longitude,
-      isActive: true, // Always active since it's the only one
+      isActive: true,
     };
 
     // Check if the user has any existing addresses
@@ -312,17 +322,21 @@ exports.updateShippingAddress = async (req, res) => {
   try {
     const { id, addressId } = req.params; // Assuming userId and addressId are passed in the URL params
     const {
+      name,
+      phone,
+      houseNo,
+      plusCode,
+      locality,
+      sublocality,
+      fullAddress,
       landmark,
       city,
       state,
       country,
       postalCode,
-      name,
-      phone,
       latitude,
       longitude,
       isActive,
-      addressLine2,
     } = req.body;
 
     console.log("landmark-->>", landmark);
@@ -344,11 +358,14 @@ exports.updateShippingAddress = async (req, res) => {
     }
 
     // Update the address fields
-    user.shippingAddresses[addressIndex] = {
-      ...user.shippingAddresses[addressIndex],
+    user.shippingAddresses[addressIndex].set({
       name,
       phone,
-      addressLine2,
+      houseNo: houseNo || "",
+      plusCode: plusCode || "",
+      locality: locality || "",
+      sublocality: sublocality || "",
+      fullAddress,
       landmark,
       city,
       state,
@@ -357,7 +374,7 @@ exports.updateShippingAddress = async (req, res) => {
       latitude,
       longitude,
       isActive,
-    };
+    });
 
     // Set availableLocalities to the postalCode of the active address
     const activeAddress = user.shippingAddresses.find((addr) => addr.isActive);

@@ -155,6 +155,9 @@ const orderSchema = new Schema({
         type: String,
         default: null,
     },
+    cancellationReason: {
+        type: String,
+    },
 });
 
 // Middleware to generate unique orderId and set the vendor to admin
