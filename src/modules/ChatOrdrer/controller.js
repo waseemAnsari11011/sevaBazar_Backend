@@ -109,7 +109,7 @@ const createChatOrder = async (req, res) => {
             // Push Notification for wake-up/background
             if (vendorDetails && vendorDetails.deviceToken) {
                 console.log(`[PUSH] Sending new chat order alert to vendor: ${vendorDetails.name}`);
-                const pushTitle = "New Chat Order Request! 🛎️";
+                const pushTitle = "New Chat Order Request! �️";
                 const pushBody = `You have a new chat order request #${savedOrder.orderId}. Open to view!`;
 
                 const pushData = {

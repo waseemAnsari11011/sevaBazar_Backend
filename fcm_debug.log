@@ -2219,3 +2219,327 @@
 
 [2026-03-02T15:48:56.136Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
 [2026-03-02T15:48:56.749Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772466536765278%b37b294ab37b294a
+
+[2026-03-03T06:31:44.552Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T06:31:44.661Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T06:49:22.828Z] Order 222013: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T06:49:22.830Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T06:49:23.490Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772520562948096%9c8a17ac9c8a17ac
+
+[2026-03-03T06:49:32.967Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T06:49:33.243Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772520572699740%b37b294ab37b294a
+
+[2026-03-03T07:28:24.435Z] Order 568461: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T07:28:24.437Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T07:28:24.744Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772522904266046%9c8a17ac9c8a17ac
+
+[2026-03-03T07:28:49.891Z] Attempting FCM to: dlz7L3iORZ... Type: order_cancelled (Critical: false)
+[2026-03-03T07:28:50.145Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772522929665248%9c8a17ac9c8a17ac
+
+[2026-03-03T07:29:22.028Z] Attempting FCM to: dlz7L3iORZ... Type: order_cancelled (Critical: false)
+[2026-03-03T07:29:22.445Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772522961803518%9c8a17ac9c8a17ac
+
+[2026-03-03T07:29:46.607Z] Order 469248: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T07:29:46.609Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T07:29:46.993Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772522986415242%9c8a17ac9c8a17ac
+
+[2026-03-03T07:30:06.009Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T07:30:06.345Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523005863571%b37b294ab37b294a
+
+[2026-03-03T07:32:07.897Z] Order 899406: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T07:32:07.899Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T07:32:08.287Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523127696666%9c8a17ac9c8a17ac
+
+[2026-03-03T07:32:13.258Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T07:32:13.474Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523132918058%b37b294ab37b294a
+
+[2026-03-03T07:41:19.847Z] Order 974439: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T07:41:19.849Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T07:41:20.137Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523679645861%9c8a17ac9c8a17ac
+
+[2026-03-03T07:41:38.827Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T07:41:39.100Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523698626684%b37b294ab37b294a
+
+[2026-03-03T07:41:59.888Z] Attempting FCM to: dlz7L3iORZ... Type: order_cancelled (Critical: false)
+[2026-03-03T07:42:00.220Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523719699893%9c8a17ac9c8a17ac
+
+[2026-03-03T07:44:04.570Z] Order 351921: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T07:44:04.572Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T07:44:04.920Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523844469564%9c8a17ac9c8a17ac
+
+[2026-03-03T07:44:18.891Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T07:44:19.148Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523858695195%b37b294ab37b294a
+
+[2026-03-03T07:45:18.562Z] Attempting FCM to: dlz7L3iORZ... Type: order_cancelled (Critical: false)
+[2026-03-03T07:45:19.195Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523918730385%9c8a17ac9c8a17ac
+
+[2026-03-03T07:45:39.068Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T07:45:39.409Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523938878227%9c8a17ac9c8a17ac
+
+[2026-03-03T07:45:52.053Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T07:45:52.402Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523951935835%b37b294ab37b294a
+
+[2026-03-03T07:46:33.568Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T07:46:33.841Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772523993348619%b37b294ab37b294a
+
+[2026-03-03T08:02:12.949Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:02:13.027Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:02:27.306Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:02:27.358Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:02:41.297Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:02:41.345Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:04:45.897Z] Attempting FCM to: dlz7L3iORZ... Type: order_cancelled (Critical: false)
+[2026-03-03T08:04:46.493Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772525086058422%9c8a17ac9c8a17ac
+
+[2026-03-03T08:06:00.668Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T08:06:00.972Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772525160503211%b37b294ab37b294a
+
+[2026-03-03T08:06:07.147Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T08:06:07.537Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772525167077787%b37b294ab37b294a
+
+[2026-03-03T08:14:12.641Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:14:12.713Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:14:27.920Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:14:27.969Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:27:02.249Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:27:02.282Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:28:10.524Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T08:28:11.112Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772526490678276%b37b294ab37b294a
+
+[2026-03-03T08:31:34.985Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:31:35.046Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:32:34.060Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:32:34.103Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:32:35.787Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:32:35.828Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:32:54.262Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:32:54.299Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:35:15.626Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:35:15.688Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:36:23.538Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:36:23.579Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:40:04.259Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T08:40:04.331Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T08:40:52.519Z] Order 343300: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T08:40:52.521Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T08:40:53.147Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527252745686%9c8a17ac9c8a17ac
+
+[2026-03-03T08:41:03.581Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T08:41:03.822Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527263425563%b37b294ab37b294a
+
+[2026-03-03T08:41:32.787Z] Attempting FCM to: dlz7L3iORZ... Type: order_cancelled (Critical: false)
+[2026-03-03T08:41:33.111Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527292652203%9c8a17ac9c8a17ac
+
+[2026-03-03T08:42:02.967Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T08:42:03.414Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527322978130%9c8a17ac9c8a17ac
+
+[2026-03-03T08:43:11.321Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T08:43:11.559Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527391172459%9c8a17ac9c8a17ac
+
+[2026-03-03T08:43:22.847Z] Attempting FCM to: cGKAFgYHTY... Type: order_cancelled (Critical: false)
+[2026-03-03T08:43:23.212Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527402810243%b37b294ab37b294a
+
+[2026-03-03T08:43:56.234Z] Order 400917: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T08:43:56.236Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T08:43:56.472Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527436087894%9c8a17ac9c8a17ac
+
+[2026-03-03T08:49:34.463Z] Attempting FCM to: cGKAFgYHTY... Type: order_cancelled (Critical: false)
+[2026-03-03T08:49:34.716Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527774332378%b37b294ab37b294a
+
+[2026-03-03T08:49:39.855Z] Attempting FCM to: cGKAFgYHTY... Type: order_cancelled (Critical: false)
+[2026-03-03T08:49:40.288Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527779842615%b37b294ab37b294a
+
+[2026-03-03T08:51:34.754Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T08:51:35.099Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527894696607%9c8a17ac9c8a17ac
+
+[2026-03-03T08:53:04.317Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T08:53:04.552Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772527984179016%9c8a17ac9c8a17ac
+
+[2026-03-03T08:53:55.251Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T08:53:55.617Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772528035227287%b37b294ab37b294a
+
+[2026-03-03T08:54:00.227Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T08:54:00.398Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772528039977077%b37b294ab37b294a
+
+[2026-03-03T09:22:26.663Z] Order 797057: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T09:22:26.668Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T09:22:27.089Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772529746714103%9c8a17ac9c8a17ac
+
+[2026-03-03T09:23:22.930Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T09:23:23.520Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772529803152024%b37b294ab37b294a
+
+[2026-03-03T09:24:19.249Z] Order 888306: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T09:24:19.250Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T09:24:19.625Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772529859163012%9c8a17ac9c8a17ac
+
+[2026-03-03T09:24:26.533Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T09:24:26.810Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772529866450157%b37b294ab37b294a
+
+[2026-03-03T09:24:49.951Z] Order 291179: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T09:24:49.952Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T09:24:50.262Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772529889892198%9c8a17ac9c8a17ac
+
+[2026-03-03T09:25:15.969Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T09:25:16.292Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772529915894994%b37b294ab37b294a
+
+[2026-03-03T10:39:46.616Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T10:39:46.726Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T10:43:45.043Z] Order 867753: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T10:43:45.046Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T10:43:45.605Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772534625342210%9c8a17ac9c8a17ac
+
+[2026-03-03T10:44:01.574Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T10:44:01.915Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772534641668046%b37b294ab37b294a
+
+[2026-03-03T10:44:33.651Z] Order 714350: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T10:44:33.652Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T10:44:33.987Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772534673747754%9c8a17ac9c8a17ac
+
+[2026-03-03T10:45:30.345Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T10:45:30.609Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772534730347437%b37b294ab37b294a
+
+[2026-03-03T10:51:09.069Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T10:51:09.147Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T11:01:37.728Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T11:01:37.795Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T11:02:37.226Z] Order 362801: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:02:37.229Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:02:37.777Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535757532387%9c8a17acf9fd7ecd
+
+[2026-03-03T11:02:45.102Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:02:45.362Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535765124236%b37b294ab37b294a
+
+[2026-03-03T11:03:24.635Z] Order 356841: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:03:24.637Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:03:24.925Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535804676820%9c8a17acf9fd7ecd
+
+[2026-03-03T11:04:14.587Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:04:14.951Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535854733067%b37b294ab37b294a
+
+[2026-03-03T11:04:46.190Z] Order 785447: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:04:46.191Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:04:46.437Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535886207023%9c8a17acf9fd7ecd
+
+[2026-03-03T11:05:00.607Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:05:00.941Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535900710942%b37b294ab37b294a
+
+[2026-03-03T11:05:29.826Z] Order 289932: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:05:29.828Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:05:30.205Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535929896349%9c8a17acf9fd7ecd
+
+[2026-03-03T11:05:50.391Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:05:50.766Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772535950538786%b37b294ab37b294a
+
+[2026-03-03T11:06:46.745Z] Order 600945: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:06:46.746Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:06:47.145Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536006900071%9c8a17acf9fd7ecd
+
+[2026-03-03T11:07:16.734Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:07:17.002Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536036769842%b37b294ab37b294a
+
+[2026-03-03T11:09:51.833Z] Initializing Firebase Admin via path: C:\Users\raja\Desktop\sevabazar\sevaBazar_Backend\firebaseConfig.json
+[2026-03-03T11:09:51.924Z] Firebase Admin Initialized Successfully.
+
+[2026-03-03T11:18:15.485Z] Order 427357: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:18:15.488Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:18:16.336Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536696076637%9c8a17acf9fd7ecd
+
+[2026-03-03T11:18:22.478Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:18:22.752Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536702550591%b37b294ab37b294a
+
+[2026-03-03T11:18:58.793Z] Order 618619: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:18:58.795Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:18:59.128Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536738832540%9c8a17acf9fd7ecd
+
+[2026-03-03T11:19:04.994Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:19:05.309Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536745090600%b37b294ab37b294a
+
+[2026-03-03T11:19:34.114Z] Order 414634: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:19:34.115Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:19:34.345Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536774144035%9c8a17acf9fd7ecd
+
+[2026-03-03T11:19:54.686Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:19:54.929Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536794722801%b37b294ab37b294a
+
+[2026-03-03T11:20:29.776Z] Order 707704: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:20:29.778Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:20:30.137Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536829924321%9c8a17acf9fd7ecd
+
+[2026-03-03T11:20:42.974Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:20:43.303Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536843029341%b37b294ab37b294a
+
+[2026-03-03T11:21:24.151Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:21:24.407Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536884205961%9c8a17acf9fd7ecd
+
+[2026-03-03T11:22:46.424Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:22:46.770Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536966574818%9c8a17acf9fd7ecd
+
+[2026-03-03T11:23:17.006Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:23:17.335Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772536997148302%b37b294ab37b294a
+
+[2026-03-03T11:23:21.467Z] Attempting FCM to: egUhotNRQ9... Type: order_status_update (Critical: false)
+[2026-03-03T11:23:21.608Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772537001394074%b37b294ab37b294a
+
+[2026-03-03T11:23:39.684Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:23:39.930Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772537019727751%9c8a17acf9fd7ecd
+
+[2026-03-03T11:25:32.556Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T11:25:32.807Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772537132612400%b37b294ab37b294a
+
+[2026-03-03T11:26:15.873Z] Order 598530: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:26:15.874Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:26:16.095Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772537175909223%9c8a17acf9fd7ecd
+
+[2026-03-03T11:26:19.565Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T11:26:19.693Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772537179502713%b37b294ab37b294a
+
+[2026-03-03T11:41:48.620Z] Order 217116: Checking token for vendor 697482171fb0c0d7c5f88bd4: FOUND
+
+[2026-03-03T11:41:48.623Z] Attempting FCM to: dlz7L3iORZ... Type: new_order (Critical: true)
+[2026-03-03T11:41:48.909Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772538108710321%9c8a17acf9fd7ecd
+
+[2026-03-03T11:41:52.787Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T11:41:52.929Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772538112746216%b37b294ab37b294a
+
+[2026-03-03T11:50:24.427Z] Attempting FCM to: cGKAFgYHTY... Type: order_status_update (Critical: false)
+[2026-03-03T11:50:24.809Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1772538624616334%b37b294ab37b294a
