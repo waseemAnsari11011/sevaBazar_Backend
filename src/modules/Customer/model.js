@@ -27,7 +27,19 @@ const customerSchema = new Schema({
       landmark: {
         type: String,
       },
-      addressLine2: {
+      houseNo: {
+        type: String,
+      },
+      plusCode: {
+        type: String,
+      },
+      locality: {
+        type: String,
+      },
+      sublocality: {
+        type: String,
+      },
+      fullAddress: {
         type: String,
       },
       city: {

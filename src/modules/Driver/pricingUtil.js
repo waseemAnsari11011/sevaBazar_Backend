@@ -31,16 +31,16 @@ const matchTieredFee = (distance, config) => {
         ) {
             let conditionDesc = "";
             if (condition.conditionType === "range") {
-                conditionDesc = `Range: ${condition.minDistance}-${condition.maxDistance} km`;
+                conditionDesc = `Delivery charge for ${condition.minDistance}–${condition.maxDistance} km: ₹${condition.deliveryFee}`;
             } else if (condition.conditionType === "greaterThan") {
-                conditionDesc = `Distance > ${condition.minDistance} km`;
+                conditionDesc = `Delivery charge for distance > ${condition.minDistance} km: ₹${condition.deliveryFee}`;
             } else if (condition.conditionType === "lessThan") {
-                conditionDesc = `Distance < ${condition.maxDistance} km`;
+                conditionDesc = `Delivery charge for distance < ${condition.maxDistance} km: ₹${condition.deliveryFee}`;
             }
 
             return {
                 amount: condition.deliveryFee,
-                description: `Distance: ${distance.toFixed(1)} km | ${conditionDesc}`
+                description: `Total Distance: ${distance.toFixed(1)} km\n${conditionDesc}`
             };
         }
     }
@@ -65,7 +65,7 @@ const calculateDeliveryFee = (distance, settings) => {
     if (distance <= baseDistance) {
         return {
             amount: basePay,
-            description: `Distance: ${distance.toFixed(1)} km | Fixed (up to ${baseDistance} km)`
+            description: `Total Distance: ${distance.toFixed(1)} km\nFixed delivery charge up to ${baseDistance} km`
         };
     } else {
         const extraDistance = distance - baseDistance;
@@ -74,7 +74,7 @@ const calculateDeliveryFee = (distance, settings) => {
 
         return {
             amount: total,
-            description: `Distance: ${distance.toFixed(1)} km | Fixed: ₹${basePay} + Extra: ₹${extraCharge.toFixed(2)}`
+            description: `Total Distance: ${distance.toFixed(1)} km\nFixed: ₹${basePay} + Extra: ₹${extraCharge.toFixed(2)} for extra km`
         };
     }
 };
@@ -134,7 +134,7 @@ const calculateDriverDeliveryFee = (currentGeo, pickupGeo, dropGeo, settings) =>
         extraDistance: Number(extraDistance.toFixed(2)),
         extraPay: Number(extraPay.toFixed(2)),
         totalFee: Number(totalFee.toFixed(2)),
-        description: `Distance: ${totalDistance.toFixed(1)} km | Base: ₹${basePay} + Extra: ₹${extraPay.toFixed(2)} (${extraDistance.toFixed(1)} km extra)`
+        description: `Total Distance: ${totalDistance.toFixed(1)} km\nBase Pay: ₹${basePay} + Extra: ₹${extraPay.toFixed(2)} for ${extraDistance.toFixed(1)} km extra`
     };
 };
 

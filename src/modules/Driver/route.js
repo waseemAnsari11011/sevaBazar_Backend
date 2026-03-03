@@ -30,6 +30,9 @@ router.post("/driver/login", driverController.driverLogin);
 // Admin only route to update driver status (Approve/Suspend)
 router.patch("/driver/:id/status", authenticateToken, authorizeAdmin, driverController.updateDriverStatus);
 
+// Admin only route to unblock a driver blocked due to rejections
+router.patch("/driver/:id/unblock", authenticateToken, authorizeAdmin, driverController.unblockDriver);
+
 // Driver routes for real-time tracking
 router.patch("/driver/status", authenticateToken, driverController.updateOnlineStatus);
 router.patch("/driver/location", authenticateToken, driverController.updateLocation);

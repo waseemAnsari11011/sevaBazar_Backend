@@ -19,6 +19,7 @@ router.put('/order/status/:orderId/vendor/:vendorId', orderController.updateOrde
 // router.get('/orders/customer/:customerId', orderController.getOrdersByCustomerAndStatus);
 // Route to get all orders by customer ID
 router.get('/orders/customer/:customerId', orderController.getOrdersByCustomerId);
+router.get('/order/customer/single/:orderId', orderController.getOrderById);
 router.get('/order-history/:customerId', orderController.getOrdersHistoryByCustomerId);
 router.get('/mark-viewed/orders/:vendorId', orderController.markOrderViewed);
 router.get('/delivery/unaccepted-orders', orderController.getUnacceptedOrders);

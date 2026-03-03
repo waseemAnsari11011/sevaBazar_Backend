@@ -40,10 +40,6 @@ const driverSchema = new Schema({
         enum: ["approved", "suspended"],
         default: "approved",
     },
-    floatingCashLimit: {
-        type: Number,
-        default: 2000,
-    },
     isOnline: {
         type: Boolean,
         default: false,
@@ -86,6 +82,34 @@ const driverSchema = new Schema({
         default: Date.now,
     },
     updatedAt: {
+        type: Date,
+        default: Date.now,
+    },
+    lastOnlineAt: {
+        type: Date,
+        default: null,
+    },
+    totalOnlineTimeToday: {
+        type: Number,
+        default: 0,
+    },
+    lastOnlineResetAt: {
+        type: Date,
+        default: Date.now,
+    },
+    rejectionCount: {
+        type: Number,
+        default: 0,
+    },
+    isBlocked: {
+        type: Boolean,
+        default: false,
+    },
+    blockedAt: {
+        type: Date,
+        default: null,
+    },
+    lastRejectionResetAt: {
         type: Date,
         default: Date.now,
     },

@@ -290,6 +290,29 @@ exports.updatePaymentStatusManually = async (req, res) => {
     }
 };
 
+exports.getOrderById = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const query = mongoose.Types.ObjectId.isValid(orderId)
+            ? { _id: orderId }
+            : { orderId: orderId };
+
+        const order = await Order.findOne(query)
+            .populate('customer')
+            .populate('vendors.vendor')
+            .populate('vendors.products.product')
+            .populate('driverId');
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        res.status(200).json(order);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
 
 //
 
@@ -781,7 +804,8 @@ exports.getRecentOrdersByVendor = async (req, res) => {
 
 exports.updateOrderStatus = async (req, res) => {
     const { orderId, vendorId } = req.params;
-    const { newStatus, pickupOtp: enteredOtp } = req.body;
+    const { newStatus, pickupOtp: enteredOtp, cancelledBy, cancellationReason, rejectionReason } = req.body;
+    const finalReason = cancellationReason || rejectionReason;
 
     try {
         // Find the order first to check for OTP if needed
@@ -811,7 +835,8 @@ exports.updateOrderStatus = async (req, res) => {
             : { orderId: orderId, 'vendors.vendor': new mongoose.Types.ObjectId(vendorId) };
 
         // ===== Auto-Block Logic for Vendor =====
-        if (newStatus === 'Cancelled') {
+        // Only increment rejectionCount if VENDOR cancelled, NOT the customer
+        if (newStatus === 'Cancelled' && cancelledBy === 'vendor') {
             try {
                 const vendorDoc = await Vendor.findById(vendorId);
                 if (vendorDoc) {
@@ -836,7 +861,12 @@ exports.updateOrderStatus = async (req, res) => {
 
         const order = await Order.findOneAndUpdate(
             updateQuery,
-            { $set: { 'vendors.$.orderStatus': newStatus } },
+            {
+                $set: {
+                    'vendors.$.orderStatus': newStatus,
+                    'vendors.$.cancellationReason': finalReason
+                }
+            },
             { new: true }
         ).populate('customer'); // Ensure customer details are populated
 
@@ -951,19 +981,91 @@ exports.updateOrderStatus = async (req, res) => {
 
             // Retrieve the customer from database to get FCM token
             const customer = await Customer.findById(customerId);
-            if (customer && customer.fcmDeviceToken) {
-                const fcmtoken = customer.fcmDeviceToken;
 
-                const title = 'Order Status Updated';
-                const body = `The status of your order ${orderId} has been updated to ${newStatus}.`;
-                try {
-                    // Assuming you have a function or service to send push notifications
-                    let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
-                    console.log("Push notification response:", pushNotificationRes);
-                } catch (error) {
-                    console.error('Error sending push notification:', error);
+            // Skip notifying the customer if they are the one who cancelled the order
+            if (newStatus === 'Cancelled' && cancelledBy === 'customer') {
+                console.log(`Skipping notification for customer ${customerId} as they initiated the cancellation.`);
+            } else if (customer) {
+                const title = `Order Status: ${newStatus}`;
+                const body = `#${order.orderId} has been ${newStatus}`;
+                const data = {
+                    type: newStatus === 'Cancelled' ? 'order_cancelled' : 'order_status_update',
+                    orderId: order._id.toString(),
+                    shortId: order.orderId,
+                    newStatus,
+                    orderType: 'standard'
+                };
+
+                // Send Push Notification
+                if (customer.fcmDeviceToken) {
+                    try {
+                        let pushNotificationRes = await sendPushNotification(customer.fcmDeviceToken, title, body, data);
+                        console.log('[PUSH] Customer notified:', pushNotificationRes);
+                    } catch (error) {
+                        console.error('Error sending push notification:', error);
+                    }
+                }
+
+                // Also emit socket event to customer room
+                const ioInst = req.app.get('io');
+                if (ioInst && customerId) {
+                    console.log(`[SOCKET] Emitting order_status_update to customer: ${customerId}`);
+                    ioInst.to(customerId.toString()).emit('order_status_update', {
+                        orderId: order._id.toString(),
+                        newStatus,
+                        orderType: 'standard'
+                    });
                 }
             }
+        }
+
+        // ===== NEW: Notify Vendor and Driver on Customer Cancellation =====
+        if (newStatus === 'Cancelled' && cancelledBy === 'customer') {
+            try {
+                // 1. Notify Vendor
+                const vendorObj = await Vendor.findById(vendorId);
+                if (vendorObj && vendorObj.deviceToken) {
+                    const vendorTitle = 'Order Cancelled by Customer';
+                    const vendorBody = `Order #${order.orderId} has been cancelled. Reason: ${cancellationReason || 'No reason provided'}`;
+                    const vendorData = {
+                        type: 'order_cancelled',
+                        orderId: order._id.toString(),
+                        shortId: order.orderId,
+                        vendorId: vendorId // Inclusion for detail fetching
+                    };
+                    sendPushNotification(vendorObj.deviceToken, vendorTitle, vendorBody, vendorData)
+                        .catch(err => console.error('[FCM] Vendor cancellation notify error:', err));
+                }
+
+                // 2. Notify Driver (if assigned)
+                if (order.driverId) {
+                    const driverObj = await Driver.findById(order.driverId);
+                    if (driverObj && driverObj.deviceToken) {
+                        const driverTitle = 'Order Cancelled';
+                        const driverBody = `Order #${order.orderId} has been cancelled by the customer. Reason: ${cancellationReason || 'No reason provided'}`;
+                        const driverData = {
+                            type: 'order_cancelled',
+                            orderId: order._id.toString(),
+                            shortId: order.orderId
+                        };
+                        sendPushNotification(driverObj.deviceToken, driverTitle, driverBody, driverData)
+                            .catch(err => console.error('[FCM] Driver cancellation notify error:', err));
+                    }
+                }
+            } catch (notifError) {
+                console.error('Error in cancellation notification logic:', notifError);
+            }
+        }
+        // =================================================================
+
+        // Emit socket event to vendor room for real-time refresh
+        const io = req.app.get('io');
+        if (io) {
+            console.log(`[SOCKET] Emitting order_status_update to vendor: ${vendorId}`);
+            io.to(vendorId.toString()).emit('order_status_update', {
+                orderId: order._id.toString(),
+                newStatus
+            });
         }
 
         res.json(order);
@@ -1186,20 +1288,41 @@ exports.handleOrderOfferResponse = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Driver not found' });
         }
 
+        // Check if driver is blocked
+        if (driver.isBlocked) {
+            return res.status(403).json({ success: false, message: 'Your account is blocked due to multiple rejections. Please contact support.' });
+        }
+
         // Check if driver already has an active order
         if (action === 'accept' && driver.currentOrderId) {
             return res.status(400).json({ success: false, message: 'You already have an active order. Please complete it first.' });
         }
 
         if (action === 'reject') {
+            const { rejectionReason } = req.body;
             const OrderAssignment = require('../Driver/orderAssignment.model');
             const assignment = await OrderAssignment.findOneAndUpdate(
                 { orderId: dbOrderIdForAssignment, driverId: deliveryManId },
-                { status: 'rejected' },
+                { status: 'rejected', rejectionReason: rejectionReason || 'No reason provided' },
                 { new: true }
             );
             if (!assignment) return res.status(404).json({ success: false, message: 'Offer not found' });
-            return res.status(200).json({ success: true, message: 'Rejected' });
+
+            // Increment rejection count and block if necessary
+            driver.rejectionCount = (driver.rejectionCount || 0) + 1;
+            if (driver.rejectionCount >= 3) {
+                driver.isBlocked = true;
+                driver.blockedAt = new Date();
+                console.log(`[BLOCK] Driver ${driver._id} blocked due to 3 rejections.`);
+            }
+            await driver.save();
+
+            return res.status(200).json({
+                success: true,
+                message: 'Rejected',
+                rejectionCount: driver.rejectionCount,
+                isBlocked: driver.isBlocked
+            });
         }
 
         // POPULATE VENDOR FOR FEE CALCULATION
@@ -1323,6 +1446,28 @@ exports.handleOrderOfferResponse = async (req, res) => {
                 otherAssignments.forEach(assignment => {
                     io.to(assignment.driverId.toString()).emit('order_taken', { orderId: orderId });
                 });
+
+                // Notify Vendor(s) to refresh their page and see the assigned rider
+                if (isChatOrder) {
+                    if (order.vendor) {
+                        console.log(`[SOCKET] Emitting order_status_update (Driver Accept) to vendor: ${order.vendor._id || order.vendor}`);
+                        io.to((order.vendor._id || order.vendor).toString()).emit('order_status_update', {
+                            orderId: order._id.toString(),
+                            status: 'Rider Assigned'
+                        });
+                    }
+                } else {
+                    order.vendors.forEach(v => {
+                        const vId = v.vendor._id || v.vendor;
+                        if (vId) {
+                            console.log(`[SOCKET] Emitting order_status_update (Driver Accept) to vendor: ${vId}`);
+                            io.to(vId.toString()).emit('order_status_update', {
+                                orderId: order._id.toString(),
+                                status: 'Rider Assigned'
+                            });
+                        }
+                    });
+                }
             }
 
         } catch (err) {

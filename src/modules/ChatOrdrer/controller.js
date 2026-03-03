@@ -83,6 +83,54 @@ const createChatOrder = async (req, res) => {
 
         await emailService.sendNewChatOrderNotificationEmail(vendorDetails.email, savedOrder, customerDetails);
 
+        // --- Notification Logic for Vendor (Chat Order) ---
+        try {
+            const io = req.app.get('io');
+            const vendorId = vendorDetails._id.toString();
+
+            const alertData = {
+                type: 'new_order',
+                isChatOrder: true,
+                orderId: savedOrder._id.toString(),
+                vendorId: vendorId,
+                shortId: savedOrder.orderId,
+                totalAmount: savedOrder.totalAmount || 0,
+                itemCount: 1, // Chat orders are usually a single request message
+                productSummary: savedOrder.orderMessage,
+                customerName: customerDetails.name || name || 'Customer',
+                customerAddress: shippingAddress?.addressLine1 || shippingAddress?.address || ''
+            };
+
+            console.log(`[SOCKET] Emitting new_chat_order to vendor: ${vendorId}`, alertData);
+            if (io) {
+                io.to(vendorId).emit('new_order', alertData);
+            }
+
+            // Push Notification for wake-up/background
+            if (vendorDetails && vendorDetails.deviceToken) {
+                console.log(`[PUSH] Sending new chat order alert to vendor: ${vendorDetails.name}`);
+                const pushTitle = "New Chat Order Request! �️";
+                const pushBody = `You have a new chat order request #${savedOrder.orderId}. Open to view!`;
+
+                const pushData = {
+                    type: 'new_order',
+                    isChatOrder: 'true',
+                    orderId: savedOrder._id.toString(),
+                    vendorId: vendorId,
+                    shortId: savedOrder.orderId,
+                    totalAmount: (savedOrder.totalAmount || 0).toString(),
+                    itemCount: '1',
+                    productSummary: savedOrder.orderMessage,
+                    customerName: alertData.customerName,
+                    customerAddress: alertData.customerAddress
+                };
+
+                sendPushNotification(vendorDetails.deviceToken, pushTitle, pushBody, pushData)
+                    .catch(err => console.error(`[PUSH] Chat Order alert error:`, err.message));
+            }
+        } catch (notifErr) {
+            console.error('[NOTIF] Chat Order notification logic error:', notifErr);
+        }
 
         return res.status(201).json({ message: 'ChatOrder created successfully', order: savedOrder });
     } catch (error) {
@@ -133,10 +181,17 @@ const updateChatOrder = async (req, res) => {
             }
             const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
             const title = 'Check Total Amount';
-            const body = `Your order: ${updatedOrder.orderMessage}. Total Amount : ₹${updatedOrder.totalAmount}.`;
+            const body = `#${updatedOrder.orderId} Total Amount : ₹${updatedOrder.totalAmount}.`;
+            const data = {
+                type: 'order_status_update',
+                orderId: updatedOrder._id.toString(),
+                shortId: updatedOrder.orderId,
+                newStatus: 'Pending',
+                orderType: 'chat'
+            };
             try {
                 // Assuming you have a function or service to send push notifications
-                let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
+                let pushNotificationRes = await sendPushNotification(fcmtoken, title, body, data);
 
             } catch (error) {
                 console.error('Error sending push notification:', error);
@@ -237,14 +292,17 @@ const getChatOrdersHistoryByCustomer = async (req, res) => {
 
 const updateChatOrderStatus = async (req, res) => {
     const { orderId } = req.params;
-    const { newStatus } = req.body;
-
+    const { newStatus, cancelledBy, cancellationReason, rejectionReason } = req.body;
+    const finalReason = cancellationReason || rejectionReason;
 
     try {
         // Prepare the update object
         let updateData = { orderStatus: newStatus };
         if (newStatus === 'Shipped') {
             updateData.arrivalAt = new Date(Date.now() + 15 * 60 * 1000); // Set arrival time to 15 minutes from now
+        }
+        if (newStatus === 'Cancelled' && finalReason) {
+            updateData.cancellationReason = finalReason;
         }
 
         // Find the order by ID or numeric orderID and update the status
@@ -253,10 +311,11 @@ const updateChatOrderStatus = async (req, res) => {
             query,
             { $set: updateData },
             { new: true }
-        );
+        ).populate('customer');
 
         // ===== Auto-Block Logic for Vendor (Chat Order) =====
-        if (newStatus === 'Cancelled' && order) {
+        // Only increment rejectionCount if VENDOR cancelled, NOT the customer
+        if (newStatus === 'Cancelled' && order && cancelledBy === 'vendor') {
             try {
                 const vendorId = order.vendor;
                 const vendorDoc = await Vendor.findById(vendorId);
@@ -279,6 +338,46 @@ const updateChatOrderStatus = async (req, res) => {
         }
         // ====================================================
 
+        // ===== NEW: Notify Vendor and Driver on Customer Cancellation (Chat Order) =====
+        if (newStatus === 'Cancelled' && order && cancelledBy === 'customer') {
+            try {
+                // 1. Notify Vendor
+                const vendorObj = await Vendor.findById(order.vendor);
+                if (vendorObj && vendorObj.deviceToken) {
+                    const vendorTitle = 'Chat Order Cancelled by Customer';
+                    const vendorBody = `Chat Order #${order.orderId} has been cancelled. Reason: ${cancellationReason || 'No reason provided'}`;
+                    const vendorData = {
+                        type: 'order_cancelled',
+                        isChatOrder: 'true',
+                        orderId: order._id.toString(),
+                        shortId: order.orderId
+                    };
+                    sendPushNotification(vendorObj.deviceToken, vendorTitle, vendorBody, vendorData)
+                        .catch(err => console.error('[FCM] Vendor chat cancellation notify error:', err));
+                }
+
+                // 2. Notify Driver (if assigned)
+                if (order.driverId) {
+                    const driverObj = await Driver.findById(order.driverId);
+                    if (driverObj && driverObj.deviceToken) {
+                        const driverTitle = 'Chat Order Cancelled';
+                        const driverBody = `Chat Order #${order.orderId} has been cancelled by the customer. Reason: ${cancellationReason || 'No reason provided'}`;
+                        const driverData = {
+                            type: 'order_cancelled',
+                            isChatOrder: 'true',
+                            orderId: order._id.toString(),
+                            shortId: order.orderId
+                        };
+                        sendPushNotification(driverObj.deviceToken, driverTitle, driverBody, driverData)
+                            .catch(err => console.error('[FCM] Driver chat cancellation notify error:', err));
+                    }
+                }
+            } catch (notifError) {
+                console.error('Error in chat cancellation notification logic:', notifError);
+            }
+        }
+        // ===============================================================================
+
         if (!order) {
             return res.status(404).json({ error: 'Order not found' });
         }
@@ -300,20 +399,52 @@ const updateChatOrderStatus = async (req, res) => {
 
         // Retrieve the customer from database to get FCM token
         const customer = await Customer.findById(customerId);
-        if (!customer) {
-            return res.status(404).json({ error: 'Customer not found' });
+
+        // Skip notifying the customer if they are the one who cancelled the order
+        if (newStatus === 'Cancelled' && cancelledBy === 'customer') {
+            console.log(`Skipping notification for customer ${customerId} as they initiated the cancellation.`);
+        } else if (customer) {
+            const data = {
+                type: newStatus === 'Cancelled' ? 'order_cancelled' : 'order_status_update',
+                orderId: order._id.toString(),
+                shortId: order.orderId,
+                newStatus,
+                orderType: 'chat'
+            };
+            const title = `Order Status: ${newStatus}`;
+            const body = `#${order.orderId} has been ${newStatus}`;
+
+            // Send Push Notification
+            if (customer.fcmDeviceToken) {
+                try {
+                    await sendPushNotification(customer.fcmDeviceToken, title, body, data);
+                    console.log(`[PUSH] Customer notified for chat order ${newStatus}`);
+                } catch (error) {
+                    console.error('Error sending push notification to customer:', error);
+                }
+            }
+
+            // Also emit socket event to customer room
+            const ioInst = req.app.get('io');
+            if (ioInst && customerId) {
+                console.log(`[SOCKET] Emitting order_status_update (CHAT) to customer: ${customerId}`);
+                ioInst.to(customerId.toString()).emit('order_status_update', {
+                    orderId: order._id.toString(),
+                    newStatus,
+                    orderType: 'chat'
+                });
+            }
         }
 
-        const fcmtoken = customer.fcmDeviceToken; // Get FCM token from customer
-
-        const title = 'Chat Order Status Updated';
-        const body = `The status of your chat order: ${order.orderMessage}, has been updated to ${newStatus}.`;
-        try {
-            // Assuming you have a function or service to send push notifications
-            let pushNotificationRes = await sendPushNotification(fcmtoken, title, body);
-
-        } catch (error) {
-            console.error('Error sending push notification:', error);
+        // Emit socket event to vendor room for real-time refresh
+        const io = req.app.get('io');
+        if (io && order.vendor) {
+            console.log(`[SOCKET] Emitting order_status_update (CHAT) to vendor: ${order.vendor}`);
+            io.to(order.vendor.toString()).emit('order_status_update', {
+                orderId: order._id.toString(),
+                newStatus,
+                orderType: 'chat'
+            });
         }
 
         res.json(order);
@@ -418,7 +549,8 @@ const getChatOrdersByVendor = async (req, res) => {
                         floatingCashStatus: "$floatingCashStatus",
                         floatingCashAmount: "$floatingCashAmount",
                         deliveredAt: "$deliveredAt",
-                        vendorBillFile: "$vendorBillFile"
+                        vendorBillFile: "$vendorBillFile",
+                        cancellationReason: "$cancellationReason"
                     }
                 }
             },
@@ -451,7 +583,8 @@ const getChatOrdersByVendor = async (req, res) => {
                     vendors: {
                         vendor: "$_id.vendor",
                         orderStatus: "$_id.orderStatus"
-                    }
+                    },
+                    cancellationReason: "$_id.cancellationReason"
                 }
             },
             // Sort by createdAt in descending order
