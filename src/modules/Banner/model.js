@@ -12,7 +12,12 @@ const bannerSchema = new mongoose.Schema({
         type: [String],  // Array of strings to store image URLs or paths
         validate: [arrayLimit, '{PATH} exceeds the limit of 10'] // Optional: Limit the number of images
     },
-    isActive: { type: Boolean, default: false }
+    isActive: { type: Boolean, default: false },
+    type: {
+        type: String,
+        enum: ['customer', 'vendor'],
+        default: 'customer'
+    }
 
 }, {
     timestamps: true // Automatically add createdAt and updatedAt timestamps

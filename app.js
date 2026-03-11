@@ -23,6 +23,8 @@ const settingsRoutes = require("./src/modules/Settings/route");
 const VendorProductCategoryRoutes = require("./src/modules/VendorProductCategory/route");
 const TicketRoutes = require("./src/modules/Ticket/route");
 const driverRoutes = require("./src/modules/Driver/route");
+const Driver = require("./src/modules/Driver/model");
+const { autoAllocateNearestOrder } = require("./src/modules/Driver/controller");
 
 
 // Initializing express application
@@ -128,9 +130,24 @@ app.set("io", io);
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
 
-  socket.on("join", (userId) => {
+  socket.on("join", async (userId) => {
     socket.join(userId);
     socket.userId = userId; // Store userId on socket for rejection handling
+
+    // Recover pending orders if the user is an online driver
+    try {
+      const driver = await Driver.findById(userId);
+      if (driver && driver.isOnline && !driver.currentOrderId && driver.currentLocation?.coordinates?.length === 2) {
+        console.log(`[SOCKET_RECOVERY] Driver ${userId} joined. Triggering auto-allocation.`);
+        const driverLoc = {
+          latitude: driver.currentLocation.coordinates[1],
+          longitude: driver.currentLocation.coordinates[0]
+        };
+        autoAllocateNearestOrder(userId, driverLoc, app);
+      }
+    } catch (err) {
+      console.error("[SOCKET_RECOVERY] Error:", err.message);
+    }
   });
 
   socket.on("order_rejected", async ({ orderId }) => {

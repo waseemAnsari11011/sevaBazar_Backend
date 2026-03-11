@@ -1,6 +1,7 @@
 const ChatOrder = require('./model'); // Adjust the path as necessary
 const Customer = require('../Customer/model'); // Assuming you have a Customer model
 const Vendor = require('../Vendor/model'); // Assuming you have a Customer model
+const Driver = require('../Driver/model');
 const mongoose = require('mongoose');
 const Settings = require('../Settings/model');
 const emailService = require('../utils/emailService');
@@ -296,22 +297,98 @@ const updateChatOrderStatus = async (req, res) => {
     const finalReason = cancellationReason || rejectionReason;
 
     try {
+        // Fetch existing order to check driverId
+        const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
+        const existingOrder = await ChatOrder.findOne(query);
+        if (!existingOrder) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        const isCancelled = newStatus === 'Cancelled';
         // Prepare the update object
         let updateData = { orderStatus: newStatus };
         if (newStatus === 'Shipped') {
             updateData.arrivalAt = new Date(Date.now() + 15 * 60 * 1000); // Set arrival time to 15 minutes from now
         }
-        if (newStatus === 'Cancelled' && finalReason) {
-            updateData.cancellationReason = finalReason;
+        if (isCancelled) {
+            if (finalReason) updateData.cancellationReason = finalReason;
+            updateData.driverId = null;
+            updateData.pickupOtp = null;
         }
 
         // Find the order by ID or numeric orderID and update the status
-        const query = mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId };
         const order = await ChatOrder.findOneAndUpdate(
             query,
             { $set: updateData },
             { new: true }
         ).populate('customer');
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // If cancelled, free the driver and trigger auto-allocation
+        if (isCancelled) {
+            try {
+                const { autoAllocateNearestOrder } = require('../Driver/controller');
+                const OrderAssignment = require('../Driver/orderAssignment.model');
+
+                // 1. Notify those with pending offers (Call Screen) to close it
+                const pendingOffers = await OrderAssignment.find({
+                    orderId: order._id,
+                    status: 'pending'
+                });
+
+                if (pendingOffers.length > 0) {
+                    const io = req.app.get('io');
+                    for (const offer of pendingOffers) {
+                        if (io) {
+                            io.to(offer.driverId.toString()).emit('order_cancelled_offer', { orderId: order.orderId });
+                        }
+
+                        // Also send Push Notification for Background/Killed State cleanup
+                        try {
+                            const driver = await Driver.findById(offer.driverId).select('deviceToken');
+                            if (driver && driver.deviceToken) {
+                                const title = "Chat Order Cancelled";
+                                const body = `Chat Order #${order.orderId} is no longer available.`;
+                                const data = {
+                                    type: 'order_cancelled_offer',
+                                    orderId: order.orderId.toString(),
+                                    isChatOrder: 'true'
+                                };
+                                sendPushNotification(driver.deviceToken, title, body, data).catch(e => { });
+                            }
+                        } catch (pushErr) {
+                            console.error("[CANCEL_CHAT_PUSH] Error:", pushErr.message);
+                        }
+
+                        offer.status = 'expired';
+                        await offer.save();
+                    }
+                    console.log(`[CANCEL-CHAT] Notified ${pendingOffers.length} pending drivers to close Call Screen for #${order.orderId}`);
+                }
+
+                // 2. Free the assigned driver (if any) and trigger auto-allocation
+                if (existingOrder.driverId) {
+                    const driverId = existingOrder.driverId;
+                    const driver = await Driver.findById(driverId);
+                    if (driver) {
+                        driver.currentOrderId = null;
+                        await driver.save();
+                        if (driver.currentLocation?.coordinates?.length === 2) {
+                            const driverLoc = {
+                                latitude: driver.currentLocation.coordinates[1],
+                                longitude: driver.currentLocation.coordinates[0]
+                            };
+                            autoAllocateNearestOrder(driverId, driverLoc, req.app);
+                        }
+                    }
+                }
+            } catch (driverFreeError) {
+                console.error('Error handling driver logic on chat cancellation:', driverFreeError);
+            }
+        }
 
         // ===== Auto-Block Logic for Vendor (Chat Order) =====
         // Only increment rejectionCount if VENDOR cancelled, NOT the customer

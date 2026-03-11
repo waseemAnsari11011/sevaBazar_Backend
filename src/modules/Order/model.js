@@ -170,6 +170,10 @@ const orderSchema = new Schema({
     type: String,
     default: null,
   },
+  isDriverRequested: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 // Pre-save middleware to generate a unique 6-digit orderId and calculate the total amount for each product

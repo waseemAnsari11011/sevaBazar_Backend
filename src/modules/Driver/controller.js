@@ -168,6 +168,7 @@ exports.driverLogin = async (req, res) => {
                 role: driver.role,
                 isOnline: true, // Echo back the status
                 deviceToken: deviceToken || driver.deviceToken,
+                currentLocation: driver.currentLocation,
             },
         });
     } catch (error) {
@@ -299,6 +300,15 @@ exports.updateOnlineStatus = async (req, res) => {
             return res.status(404).json({ message: "Driver not found" });
         }
 
+        // Trigger Auto-Allocation for the newly online driver
+        if (isOnline && driver.currentLocation?.coordinates?.length === 2 && !driver.currentOrderId) {
+            const driverLoc = {
+                latitude: driver.currentLocation.coordinates[1],
+                longitude: driver.currentLocation.coordinates[0]
+            };
+            autoAllocateNearestOrder(driverId, driverLoc, req.app);
+        }
+
         res.status(200).json({
             message: `Driver is now ${isOnline ? "online" : "offline"}`,
             isOnline: driver.isOnline,
@@ -358,6 +368,7 @@ exports.findNearestDrivers = async (req, res) => {
             if (typeof req === 'object') {
                 vendorId = req.vendorId;
                 orderId = req.orderId;
+                searchRadius = req.radius; // Allow internal calls to specify radius
             } else {
                 vendorId = req;
             }
@@ -397,8 +408,18 @@ exports.findNearestDrivers = async (req, res) => {
         }
 
 
-        const finalRadius = searchRadius || 10;
+        const finalRadius = searchRadius || 50;
         const radiusInMeters = finalRadius * 1000;
+
+        console.log(`[findNearestDrivers] Initiating search for Order: ${orderId} | Radius: ${finalRadius}km (${radiusInMeters}m) | Center: [${searchLon}, ${searchLat}]`);
+
+        const geoQuery = {
+            approvalStatus: "approved",
+            isOnline: true,
+            isBlocked: false,
+            currentOrderId: null,
+        };
+        console.log(`[findNearestDrivers] $geoNear Query: ${JSON.stringify(geoQuery)}`);
 
         const drivers = await Driver.aggregate([
             {
@@ -409,15 +430,18 @@ exports.findNearestDrivers = async (req, res) => {
                     },
                     distanceField: "distanceFromVendor",
                     maxDistance: radiusInMeters,
-                    query: {
-                        approvalStatus: "approved",
-                        isOnline: true,
-                        currentOrderId: null,
-                    },
+                    query: geoQuery,
                     spherical: true,
                 },
             }
         ]);
+
+        console.log(`[findNearestDrivers] $geoNear found ${drivers.length} drivers for Order: ${orderId}`);
+        if (drivers.length === 0) {
+            // Check if there are ANY online drivers regardless of distance
+            const onlineCount = await Driver.countDocuments({ isOnline: true, isBlocked: false, approvalStatus: "approved", currentOrderId: null });
+            console.log(`[findNearestDrivers] DEBUG: No drivers in radius. Total free/online drivers in DB: ${onlineCount}`);
+        }
 
         const results = drivers.map(d => ({
             id: d._id,
@@ -440,22 +464,47 @@ exports.findNearestDrivers = async (req, res) => {
         if (orderId) {
             try {
                 const Order = require('../Order/model');
-                // Use .lean() for performance and ensure vendors.vendor and customer is populated
-                orderData = await Order.findOne(mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId })
+                const mongoose = require('mongoose'); // Ensure mongoose is available for ObjectId.isValid
+                console.log(`[findNearestDrivers] Looking up Order: ${orderId}`);
+
+                // More robust OR query for orderId or _id
+                const query = {
+                    $or: [
+                        { orderId: orderId },
+                        ...(mongoose.Types.ObjectId.isValid(orderId) ? [{ _id: orderId }] : [])
+                    ]
+                };
+
+                orderData = await Order.findOne(query)
                     .populate('vendors.vendor')
                     .populate('customer', 'name contactNumber');
 
                 if (orderData) {
+                    console.log(`[findNearestDrivers] Found Regular Order: ${orderData.orderId} (_id: ${orderData._id})`);
                     dbOrderId = orderData._id;
+                    // Set isDriverRequested to true ONLY when explicitly requested via API (not internal triggers)
+                    if (!isInternal && !orderData.isDriverRequested) {
+                        orderData.isDriverRequested = true;
+                        await orderData.save();
+                    }
                 } else {
                     // Try ChatOrder
+                    console.log(`[findNearestDrivers] Regular Order not found, trying ChatOrder: ${orderId}`);
                     const ChatOrder = require('../ChatOrdrer/model');
-                    orderData = await ChatOrder.findOne(mongoose.Types.ObjectId.isValid(orderId) ? { _id: orderId } : { orderId: orderId })
+                    orderData = await ChatOrder.findOne(query)
                         .populate('vendor')
                         .populate('customer', 'name contactNumber');
                     if (orderData) {
+                        console.log(`[findNearestDrivers] Found Chat Order: ${orderData.orderId} (_id: ${orderData._id})`);
                         dbOrderId = orderData._id;
                         isChatOrder = true;
+                        // Set isDriverRequested to true ONLY when explicitly requested via API (not internal triggers)
+                        if (!isInternal && !orderData.isDriverRequested) {
+                            orderData.isDriverRequested = true;
+                            await orderData.save();
+                        }
+                    } else {
+                        console.log(`[findNearestDrivers] ERROR: Order ${orderId} NOT FOUND in either model!`);
                     }
                 }
             } catch (err) {
@@ -466,7 +515,8 @@ exports.findNearestDrivers = async (req, res) => {
         // Trigger Socket Event to found drivers
         if (results.length > 0) {
             console.log(`[SOCKET] Found ${results.length} drivers: ${results.map(d => d.name).join(', ')}`);
-            const io = (req && req.app) ? req.app.get("io") : null;
+            const io = (req && req.app) ? req.app.get("io") : (req && req.io ? req.io : null);
+            console.log(`[SOCKET] io instance found: ${!!io}`);
             const OrderAssignment = require('./orderAssignment.model');
 
             // Construct full offer data if possible
@@ -593,7 +643,8 @@ exports.findNearestDrivers = async (req, res) => {
                             vendorShopPhoto: fullOfferData.vendorShopPhoto || '',
                             vendorPhone: fullOfferData.vendorPhone || 'N/A',
                             pickupLocation: JSON.stringify(fullOfferData.pickupLocation),
-                            dropLocation: JSON.stringify(fullOfferData.dropLocation)
+                            dropLocation: JSON.stringify(fullOfferData.dropLocation),
+                            totalAmount: fullOfferData.totalAmount?.toString() || '0'
                         };
                         sendPushNotification(driver.deviceToken, pushTitle, pushBody, pushData)
                             .then(res => console.log(`[PUSH] Success for ${driver.name}:`, res))
@@ -928,6 +979,116 @@ exports.initiateDeliveryCompletion = async (req, res) => {
     }
 };
 
+/**
+ * Auto-allocation logic: Finds the nearest unassigned "Processing" order
+ * and triggers findNearestDrivers for it.
+ */
+const autoAllocateNearestOrder = async (driverId, driverLocation, app) => {
+    try {
+        if (!driverId || !driverLocation) return;
+
+        const Order = require('../Order/model');
+        const ChatOrder = require('../ChatOrdrer/model');
+        const Vendor = require('../Vendor/model');
+        const { calculateDistance } = require("./pricingUtil");
+        const OrderAssignment = require('./orderAssignment.model');
+
+        // 1. Find all Processing orders without a driver
+        // Regular Orders: any vendor in processing status that doesn't have a global driver assigned
+        const pendingRegular = await Order.find({
+            driverId: null,
+            isDriverRequested: true,
+            'vendors.orderStatus': 'Processing'
+        });
+
+        const pendingChat = await ChatOrder.find({
+            driverId: null,
+            isDriverRequested: true,
+            orderStatus: 'Processing'
+        });
+
+        console.log(`[AUTO-ALLOCATE] Checking for freed driver ${driverId} | Pending Regular: ${pendingRegular.length} | Pending Chat: ${pendingChat.length}`);
+
+        // 2. Combine and find the nearest one
+        let nearestOrder = null;
+        let minDistance = Infinity;
+
+        // Handle Regular Orders
+        for (const order of pendingRegular) {
+            // Check if this specific driver already rejected this order
+            const rejected = await OrderAssignment.findOne({ orderId: order._id, driverId, status: 'rejected' });
+            if (rejected) {
+                console.log(`[AUTO-ALLOCATE] Skipping already rejected Regular order ${order.orderId} for driver ${driverId}`);
+                continue;
+            }
+
+            const rawVendor = order.vendors[0]?.vendor;
+            const firstVendorId = (rawVendor && typeof rawVendor === 'object') ? (rawVendor._id || rawVendor) : rawVendor;
+
+            if (!firstVendorId) continue;
+            const vendor = await Vendor.findById(firstVendorId);
+            if (vendor && vendor.location?.coordinates) {
+                const dist = calculateDistance(
+                    driverLocation.latitude,
+                    driverLocation.longitude,
+                    vendor.location.coordinates[1],
+                    vendor.location.coordinates[0]
+                );
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    nearestOrder = { orderId: order.orderId, vendorId: firstVendorId };
+                }
+            }
+        }
+
+        // Handle Chat Orders
+        for (const order of pendingChat) {
+            // Check if this specific driver already rejected this order
+            const rejected = await OrderAssignment.findOne({ orderId: order._id, driverId, status: 'rejected' });
+            if (rejected) {
+                console.log(`[AUTO-ALLOCATE] Skipping already rejected Chat order ${order.orderId} for driver ${driverId}`);
+                continue;
+            }
+
+            const vendorId = order.vendor;
+            const vendor = await Vendor.findById(vendorId);
+            if (vendor && vendor.location?.coordinates) {
+                const dist = calculateDistance(
+                    driverLocation.latitude,
+                    driverLocation.longitude,
+                    vendor.location.coordinates[1],
+                    vendor.location.coordinates[0]
+                );
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    nearestOrder = { orderId: order.orderId, vendorId: vendorId };
+                }
+            }
+        }
+
+        // 3. Trigger search if a nearby order is found (within 50km)
+        if (nearestOrder && minDistance <= 50) { // Increased to 50km for testing
+            console.log(`[AUTO-ALLOCATE] Found nearest pending order ${nearestOrder.orderId} for freed driver ${driverId}. Distance: ${minDistance.toFixed(2)}km. Radius: 50km.`);
+            const { findNearestDrivers } = require('./controller');
+
+            // Trigger the search internally
+            const results = await findNearestDrivers({
+                vendorId: nearestOrder.vendorId,
+                orderId: nearestOrder.orderId,
+                app: app,
+                radius: 50 // Explicitly pass a larger radius
+            });
+            console.log(`[AUTO-ALLOCATE] Internal findNearestDrivers for ${nearestOrder.orderId} found ${results?.length || 0} drivers.`);
+        } else {
+            console.log(`[AUTO-ALLOCATE] No pending order found within 50km for driver ${driverId}. Best was: ${nearestOrder?.orderId || 'None'} at ${minDistance.toFixed(2)}km`);
+        }
+    } catch (err) {
+        console.error("[AUTO-ALLOCATE] Error:", err.message);
+    }
+};
+
+exports.autoAllocateNearestOrder = autoAllocateNearestOrder;
+
 exports.completeDelivery = async (req, res) => {
     try {
         const { orderId, driverId, deliveryOtp } = req.body;
@@ -1058,6 +1219,17 @@ exports.completeDelivery = async (req, res) => {
 
         console.log(`Order ${orderId} delivered by driver ${driverId}. Earned: ₹${deliveryFee}`);
 
+        // Trigger Auto-Allocation for the newly freed driver
+        if (driver.currentLocation?.coordinates?.length === 2) {
+            const driverLoc = {
+                latitude: driver.currentLocation.coordinates[1],
+                longitude: driver.currentLocation.coordinates[0]
+            };
+            autoAllocateNearestOrder(driverId, driverLoc, req.app);
+        } else {
+            console.log(`[AUTO-ALLOCATE] Driver ${driverId} has no valid location for auto-allocation.`);
+        }
+
         // Emit socket event to vendor room for real-time refresh
         const io = req.app.get('io');
         if (io) {
@@ -1172,15 +1344,15 @@ exports.getWalletBalance = async (req, res) => {
         const totalFloatingCash = calcFloatingCash(pendingCashRegular, false) + calcFloatingCash(pendingCashChat, true);
         const totalOverdueAmount = calcFloatingCash(overdueRegular, false) + calcFloatingCash(overdueChat, true);
 
-        // Calculate real-time Paid Earnings (Available Balance - Only for Delivered orders)
-        const paidEarningsRegular = await Order.find({
+        // Calculate real-time Pending Earnings (Available Balance - Only for Delivered orders)
+        const pendingEarningsRegular = await Order.find({
             driverId: driverId,
-            driverEarningStatus: 'Paid',
+            driverEarningStatus: 'Pending',
             deliveredAt: { $ne: null }
         });
-        const paidEarningsChat = await ChatOrder.find({
+        const pendingEarningsChat = await ChatOrder.find({
             driverId: driverId,
-            driverEarningStatus: 'Paid',
+            driverEarningStatus: 'Pending',
             deliveredAt: { $ne: null }
         });
 
@@ -1207,7 +1379,7 @@ exports.getWalletBalance = async (req, res) => {
             return sum + earning;
         }, 0);
 
-        const totalPaidEarnings = calcEarnings(paidEarningsRegular) + calcEarnings(paidEarningsChat);
+        const totalPendingEarnings = calcEarnings(pendingEarningsRegular) + calcEarnings(pendingEarningsChat);
 
         // ===== Today's Progress Logic =====
         const todayRegular = await Order.find({
@@ -1269,7 +1441,7 @@ exports.getWalletBalance = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            balance: totalPaidEarnings,
+            balance: totalPendingEarnings,
             floatingCash: totalFloatingCash,
             isOnline: driver.isOnline || false,
             isPaymentOverdue: overdueOrdersCount > 0,

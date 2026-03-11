@@ -859,14 +859,20 @@ exports.updateOrderStatus = async (req, res) => {
         }
         // =======================================
 
+        const isCancelled = newStatus === 'Cancelled';
+        const updateFields = {
+            'vendors.$.orderStatus': newStatus,
+            'vendors.$.cancellationReason': finalReason
+        };
+
+        if (isCancelled) {
+            updateFields.driverId = null;
+            updateFields.pickupOtp = null;
+        }
+
         const order = await Order.findOneAndUpdate(
             updateQuery,
-            {
-                $set: {
-                    'vendors.$.orderStatus': newStatus,
-                    'vendors.$.cancellationReason': finalReason
-                }
-            },
+            { $set: updateFields },
             { new: true }
         ).populate('customer'); // Ensure customer details are populated
 
@@ -874,11 +880,78 @@ exports.updateOrderStatus = async (req, res) => {
             return res.status(404).json({ error: 'Order or vendor not found' });
         }
 
+        // If cancelled, free the driver and trigger auto-allocation
+        if (isCancelled) {
+            try {
+                const Driver = require('../Driver/model');
+                const OrderAssignment = require('../Driver/orderAssignment.model');
+                const { autoAllocateNearestOrder } = require('../Driver/controller');
+
+                // 1. Notify those with pending offers (Call Screen) to close it
+                const pendingOffers = await OrderAssignment.find({
+                    orderId: order._id,
+                    status: 'pending'
+                });
+
+                if (pendingOffers.length > 0) {
+                    const io = req.app.get('io');
+                    for (const offer of pendingOffers) {
+                        if (io) {
+                            io.to(offer.driverId.toString()).emit('order_cancelled_offer', { orderId: order.orderId });
+                        }
+
+                        // Also send Push Notification for Background/Killed State cleanup
+                        try {
+                            const Driver = require('../Driver/model');
+                            const driver = await Driver.findById(offer.driverId).select('deviceToken personalDetails');
+                            if (driver && driver.deviceToken) {
+                                const title = "Order Cancelled";
+                                const body = `Order #${order.orderId} is no longer available.`;
+                                const data = {
+                                    type: 'order_cancelled_offer',
+                                    orderId: order.orderId.toString()
+                                };
+                                // Non-critical push, but helps clear Call Screen flags
+                                sendPushNotification(driver.deviceToken, title, body, data).catch(e => { });
+                            }
+                        } catch (pushErr) {
+                            console.error("[CANCEL_PUSH] Error:", pushErr.message);
+                        }
+
+                        offer.status = 'expired';
+                        await offer.save();
+                    }
+                    console.log(`[CANCEL] Notified ${pendingOffers.length} pending drivers to close Call Screen for #${order.orderId}`);
+                }
+
+                // 2. Free the assigned driver (if any) and trigger auto-allocation
+                if (existingOrder.driverId) {
+                    const driverId = existingOrder.driverId;
+                    const driver = await Driver.findById(driverId);
+                    if (driver) {
+                        driver.currentOrderId = null;
+                        await driver.save();
+                        if (driver.currentLocation?.coordinates?.length === 2) {
+                            const driverLoc = {
+                                latitude: driver.currentLocation.coordinates[1],
+                                longitude: driver.currentLocation.coordinates[0]
+                            };
+                            autoAllocateNearestOrder(driverId, driverLoc, req.app);
+                        }
+                    }
+                }
+            } catch (driverFreeError) {
+                console.error('Error handling driver logic on cancellation:', driverFreeError);
+            }
+        }
+
         // ===== NEW: Notify drivers when vendor accepts order (status → Processing) =====
+        // REMOVED: Auto-dispatch disabled to allow manual request from Vendor App
+        /*
         if (newStatus === 'Processing' && !order.driverId) {
             try {
                 const { findNearestDrivers } = require('../Driver/controller');
-                const driverIds = await findNearestDrivers({ vendorId, orderId: order.orderId });
+                const driverIds = await findNearestDrivers({ vendorId, orderId: order.orderId, app: req.app });
 
                 if (driverIds.length > 0) {
                     console.log(`Order ${order.orderId} offered to ${driverIds.length} drivers via findNearestDrivers`);
@@ -888,6 +961,7 @@ exports.updateOrderStatus = async (req, res) => {
                 // Don't fail the status update if driver notification fails
             }
         }
+        */
         // ===== END: Driver notification =====
 
         // If the new status is 'Shipped', set arrivalAt to 15 minutes from now
@@ -1570,6 +1644,7 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                         vendorDetails: 1,
                         driver: 1,
                         pickupOtp: 1,
+                        isDriverRequested: 1,
                         items: {
                             $map: {
                                 input: "$products",
@@ -1665,6 +1740,7 @@ exports.getOrderDetailsByVendor = async (req, res) => {
                         deliveredAt: { $first: "$deliveredAt" },
                         vendorDetails: { $first: "$vendorDetails" },
                         pickupOtp: { $first: "$pickupOtp" },
+                        isDriverRequested: { $first: "$isDriverRequested" },
                         items: {
                             $push: {
                                 name: { $ifNull: ["$productDetails.name", "$vendors.products.name"] },

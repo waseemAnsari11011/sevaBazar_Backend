@@ -44,4 +44,7 @@ router.get("/search", authenticateToken, vendorController.searchVendors);
 // Get a single vendor's public details
 router.get("/:id/details", vendorController.getVendorDetails);
 
+// Toggle like for a vendor
+router.post("/:id/like", authenticateToken, vendorController.toggleVendorLike);
+
 module.exports = router;

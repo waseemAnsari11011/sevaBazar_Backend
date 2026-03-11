@@ -29,16 +29,10 @@ const sendPushNotification = async (deviceToken, title, body, data = {}) => {
   const isCriticalAlert = criticalTypes.includes(data.type);
 
   const message = {
-    // For critical alerts, we do NOT include the 'notification' property.
-    // This makes it a "Data-Only" message, which ensures the Android system 
-    // does not show a default notification and instead delivers it directly 
-    // to our FCMWakeUpService.kt while the app is in background/killed.
-    ...(!isCriticalAlert && {
-      notification: {
-        title: title,
-        body: body,
-      }
-    }),
+    notification: {
+      title: title,
+      body: body,
+    },
     data: {
       ...data,
       title: title,

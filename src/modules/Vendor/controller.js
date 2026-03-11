@@ -593,11 +593,18 @@ exports.getAllVendors = async (req, res) => {
     // 5. Find vendors, sort by most recent, apply pagination
     // 5. Find vendors, sort by most recent, apply pagination
     // 5. Find vendors, sort by most recent, apply pagination
-    const vendors = await Vendor.find({ ...locationFilter, isDeleted: { $ne: true }, isBlocked: { $ne: true } })
+    // 5. Find vendors, sort by most recent, apply pagination
+    let vendors = await Vendor.find({ ...locationFilter, isDeleted: { $ne: true }, isBlocked: { $ne: true } })
       .sort({ isOnline: -1, createdAt: -1 }) // Sort by online status then creation date
       .skip((page - 1) * limit)
       .limit(limit)
-      .select("-password"); // Exclude password
+      .select("-password") // Exclude password
+      .lean();
+
+    vendors = vendors.map(vendor => ({
+      ...vendor,
+      likesCount: vendor.likes ? vendor.likes.length : 0
+    }));
 
     // 6. Count total documents matching the filter for pagination metadata
     // 6. Count total documents matching the filter for pagination metadata
@@ -638,12 +645,18 @@ exports.getAllVendorsAdmin = async (req, res) => {
     // .sort() orders the results, showing the most recently created vendors first.
     const vendors = await Vendor.find({ isDeleted: { $ne: true } })
       .select(
-        "name email vendorInfo.contactNumber vendorInfo.businessName location.address.postalCodes isRestricted isBlocked rejectionCount"
+        "name email vendorInfo.contactNumber vendorInfo.businessName location.address.postalCodes isRestricted isBlocked rejectionCount likes"
       )
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
-    // Send a success response with the fetched vendors
-    res.status(200).json(vendors);
+    // Inject likesCount
+    const vendorsWithLikes = vendors.map(v => ({
+      ...v,
+      likesCount: v.likes ? v.likes.length : 0
+    }));
+
+    res.status(200).json(vendorsWithLikes);
   } catch (error) {
     // Log the error for debugging purposes
     console.error("Error fetching vendors for admin:", error);
@@ -736,6 +749,13 @@ exports.getVendorsWithDiscounts = async (req, res) => {
               else: { $add: [2, { $rand: {} }] },
             },
           },
+          likesCount: {
+            $cond: {
+              if: { $isArray: "$likes" },
+              then: { $size: "$likes" },
+              else: 0
+            }
+          }
         },
       },
 
@@ -998,7 +1018,6 @@ exports.getAllVendorsGroupedByCategory = async (req, res) => {
       {
         // --- (NEW) Stage 2: Add a random sort field to each document ---
         // This is the key to shuffling
-        // Online vendors get 0-1, Offline vendors get 2-3 (so they are always last)
         $addFields: {
           randomSort: {
             $cond: {
@@ -1007,6 +1026,13 @@ exports.getAllVendorsGroupedByCategory = async (req, res) => {
               else: { $add: [2, { $rand: {} }] },
             },
           },
+          likesCount: {
+            $cond: {
+              if: { $isArray: "$likes" },
+              then: { $size: "$likes" },
+              else: 0
+            }
+          }
         },
       },
       {
@@ -1123,9 +1149,16 @@ exports.getVendorsByCategory = async (req, res) => {
     };
 
     // 4. Find vendors matching the combined query
-    const vendors = await Vendor.find(finalQuery)
+    let vendors = await Vendor.find(finalQuery)
       .sort({ isOnline: -1 })
-      .select("-password");
+      .select("-password")
+      .lean(); // Use lean to add virtual fields easily
+
+    // 5. Add likesCount to each vendor
+    vendors = vendors.map(vendor => ({
+      ...vendor,
+      likesCount: vendor.likes ? vendor.likes.length : 0
+    }));
 
     res.status(200).json(vendors);
   } catch (error) {
@@ -1150,8 +1183,35 @@ exports.getVendorsByCategory = async (req, res) => {
 //Dukaan Details Page
 exports.getVendorDetails = async (req, res) => {
   try {
-    const vendor = await Vendor.findById(req.params.id).select("-password");
+    const vendor = await Vendor.findById(req.params.id).select("-password").lean();
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
+    // Optional user ID from token to check if liked
+    let userId = null;
+    const authHeader = req.headers["authorization"];
+    if (authHeader) {
+      const token = authHeader.split(" ")[1];
+      if (token && token.trim() !== "null") {
+        try {
+          const decoded = jwt.verify(token, secret);
+          userId = decoded.id;
+        } catch (err) {
+          // Token invalid/expired, ignore for public access
+        }
+      }
+    }
+
+    const likesCount = vendor.likes ? vendor.likes.length : 0;
+    let isLikedByCurrentUser = false;
+
+    if (userId && vendor.likes) {
+      isLikedByCurrentUser = vendor.likes.map(id => id.toString()).includes(userId);
+    }
+
+    // Attach dynamically calculated like info
+    vendor.likesCount = likesCount;
+    vendor.isLikedByCurrentUser = isLikedByCurrentUser;
+
     res.status(200).json(vendor);
   } catch (error) {
     res.status(500).json({ message: "Error fetching vendor details", error });
@@ -1406,5 +1466,42 @@ exports.saveDeviceToken = async (req, res) => {
   } catch (error) {
     console.error("Save Device Token Error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Toggle like for a vendor
+exports.toggleVendorLike = async (req, res) => {
+  console.log("toggleVendorLike is called");
+  try {
+    const vendorId = req.params.id;
+    const userId = req.user.id; // From authMiddleware
+
+    const vendor = await Vendor.findById(vendorId);
+
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
+
+    // Check if user already liked
+    const hasLikedIndex = vendor.likes.indexOf(userId);
+
+    if (hasLikedIndex > -1) {
+      // User already liked, so unlike
+      vendor.likes.splice(hasLikedIndex, 1);
+    } else {
+      // User hasn't liked, so add like
+      vendor.likes.push(userId);
+    }
+
+    await vendor.save();
+
+    res.status(200).json({
+      message: hasLikedIndex > -1 ? "Vendor unliked" : "Vendor liked",
+      likesCount: vendor.likes.length,
+      isLikedByCurrentUser: hasLikedIndex === -1 // True if we just added it
+    });
+  } catch (error) {
+    console.error("Toggle Vendor Like Error:", error);
+    res.status(500).json({ message: "Error toggling vendor like", error: error.message });
   }
 };

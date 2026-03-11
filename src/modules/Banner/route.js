@@ -20,6 +20,7 @@ router.put("/banner-active/:id", bannerController.makeBannerActive);
 router.delete("/banner/:id", bannerController.deleteBanner);
 router.get("/banner", bannerController.getAllBanner);
 router.get("/all-active-banner", bannerController.getAllActiveBanner);
+router.get("/all-active-banner/:type", bannerController.getAllActiveBannersByType);
 router.get("/banner/:id", bannerController.getBannerById);
 
 module.exports = router;

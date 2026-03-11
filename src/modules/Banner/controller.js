@@ -8,7 +8,7 @@ const {
 // Controller function to add a new banner
 exports.addBanner = async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, type } = req.body;
 
     // --- CHANGED ---
     // Get S3 locations from req.files instead of local paths
@@ -19,6 +19,7 @@ exports.addBanner = async (req, res) => {
     const newBanner = new Banner({
       name,
       images,
+      type: type || 'customer'
     });
 
     // Save the banner to the database
@@ -42,7 +43,7 @@ exports.addBanner = async (req, res) => {
 exports.updateBanner = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name } = req.body;
+    const { name, type } = req.body;
 
     // --- CHANGED ---
     // This logic robustly handles all cases:
@@ -87,6 +88,7 @@ exports.updateBanner = async (req, res) => {
 
     // Update the banner details
     banner.name = name || banner.name;
+    banner.type = type || banner.type;
 
     // Combine existing images (now a guaranteed array) and new S3 image locations
     const newImages = req.files.map((file) => file.location);
@@ -188,6 +190,27 @@ exports.getAllActiveBanner = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching active banners:", error);
+    res.status(500).json({
+      message: "Failed to retrieve active banners",
+      error: error.message,
+    });
+  }
+};
+
+// Controller function to get all active banners by type
+exports.getAllActiveBannersByType = async (req, res) => {
+  try {
+    const { type } = req.params;
+    // Fetch all active banners of a specific type from the database
+    const banners = await Banner.find({ isActive: true, type: type || 'customer' });
+
+    // Send the banners in the response
+    res.status(200).json({
+      message: `${type} active banners retrieved successfully`,
+      banners,
+    });
+  } catch (error) {
+    console.error("Error fetching active banners by type:", error);
     res.status(500).json({
       message: "Failed to retrieve active banners",
       error: error.message,

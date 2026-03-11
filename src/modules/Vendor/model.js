@@ -173,6 +173,12 @@ const vendorSchema = new Schema({
     default: false,
   },
 
+  // --- Likes ---
+  likes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer' // Based on debug tickets using 'Customer' ref, we use Customer model here for users
+  }],
+
   // --- Blocking Logic ---
   rejectionCount: {
     type: Number,
