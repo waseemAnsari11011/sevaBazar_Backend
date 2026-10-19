@@ -29,6 +29,10 @@ const { autoAllocateNearestOrder } = require("./src/modules/Driver/controller");
 
 // Initializing express application
 const app = express();
+
+// Keep control reachable while gating all platform HTTP routes, including uploads.
+const createPlatformAccessRouter = require("./src/modules/PlatformAccess/route");
+app.use(createPlatformAccessRouter());
 // More robust CORS configuration
 app.use(
   cors({
