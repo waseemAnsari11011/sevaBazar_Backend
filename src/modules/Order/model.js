@@ -98,15 +98,9 @@ const orderSchema = new Schema({
     enum: ["Paid", "Unpaid"],
     default: "Unpaid",
   },
-  razorpay_payment_id: {
-    type: String,
-  },
-  razorpay_order_id: {
-    type: String,
-  },
-  razorpay_signature: {
-    type: String,
-  },
+
+
+
   createdAt: {
     type: Date,
     default: Date.now,

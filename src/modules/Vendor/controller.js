@@ -1324,9 +1324,6 @@ exports.forgotPassword = async (req, res) => {
 
     await vendor.save();
 
-    console.log("EMAIL:", process.env.EMAIL);
-    console.log("EMAIL_PASSWORD:", process.env.EMAIL_PASSWORD);
-
     // Create a transporter for sending emails (configure with your email service)
     const transporter = nodemailer.createTransport({
       service: "Gmail",

@@ -3,255 +3,12 @@ const Order = require('../Order/model');
 const ChatOrder = require('../ChatOrdrer/model');
 const { Product } = require('../Product/model');
 const mongoose = require('mongoose');
-const Razorpay = require('razorpay');
-const crypto = require('crypto');
 const Vendor = require('../Vendor/model');
 const Customer = require('../Customer/model')
 const Settings = require('../Settings/model');
 const emailService = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushNotificationUtil');
 const { calculateDistance, calculateDeliveryFee } = require('../Driver/pricingUtil');
-
-//razorpay
-const razorpay = new Razorpay({
-    key_id: process.env.KEY_ID,
-    key_secret: process.env.KEY_SECRET
-});
-
-exports.createOrderRazorpay = async (req, res) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-        const { customer, vendors, shippingAddress } = req.body;
-
-        // Validate required fields
-        if (!customer || !vendors || !shippingAddress) {
-            return res.status(400).json({ error: 'All required fields must be provided' });
-        }
-
-        // Validate each vendor and their products
-        for (const vendor of vendors) {
-            if (!vendor.vendor || !vendor.products) {
-                return res.status(400).json({ error: 'Each vendor must have a vendor ID and a list of products' });
-            }
-            for (const product of vendor.products) {
-                if (!product.product || !product.quantity || !product.price || !product.variations) {
-                    return res.status(400).json({ error: 'Each product must have a product ID, quantity, and price' });
-                }
-            }
-        }
-
-        for (const vendor of vendors) {
-            for (const productInfo of vendor.products) {
-                const product = await Product.findById(productInfo.product);
-                if (!product) {
-                    return res.status(400).json({ error: `Product with ID ${productInfo.product} not found` });
-                }
-                if (product.quantity < productInfo.quantity) {
-                    return res.status(400).json({ error: `Not enough quantity available for product ${product.name}` });
-                }
-            }
-        }
-
-        // Fetch settings for delivery charge configuration
-        let settings = await Settings.findOne();
-        if (!settings) {
-            settings = await Settings.create({ vendorVisibilityRadius: 10 });
-        }
-
-        // Calculate delivery charges for each vendor
-        for (const vendor of vendors) {
-            if (!mongoose.Types.ObjectId.isValid(vendor.vendor)) {
-                return res.status(400).json({ error: `Invalid Vendor ID: ${vendor.vendor}. Please use the MongoDB _id string instead of email/name.` });
-            }
-            const vendorDetails = await Vendor.findById(vendor.vendor);
-            if (vendorDetails && vendorDetails.location && vendorDetails.location.coordinates && shippingAddress.latitude && shippingAddress.longitude) {
-                const vendorLat = vendorDetails.location.coordinates[1];
-                const vendorLon = vendorDetails.location.coordinates[0];
-                const distance = calculateDistance(vendorLat, vendorLon, shippingAddress.latitude, shippingAddress.longitude);
-
-                const feeInfo = calculateDeliveryFee(distance, settings);
-                vendor.deliveryCharge = Number(feeInfo.amount.toFixed(2));
-                vendor.deliveryChargeDescription = feeInfo.description;
-                vendor.distance = Number(distance.toFixed(2));
-            } else {
-                vendor.deliveryCharge = 0; // Default if coordinates missing
-                vendor.deliveryChargeDescription = "Missing coordinates";
-            }
-        }
-
-        // Create a new order instance
-        const newOrder = new Order({
-            customer,
-            vendors,
-            shippingAddress,
-            shippingFee: 9 // Fixed shipping fee
-        });
-
-        // Save the order to the database
-        const savedOrder = await newOrder.save();
-
-        // Calculate total amount for the order
-        let totalAmount = 0;
-        savedOrder.vendors.forEach(vendor => {
-            vendor.products.forEach(product => {
-                totalAmount += product.totalAmount;
-            });
-            totalAmount += (vendor.deliveryCharge || 0);
-        });
-
-        const SHIPPING_FEE = 9;
-        totalAmount += SHIPPING_FEE;
-
-        // Create Razorpay order
-        const options = {
-            amount: totalAmount * 100, // Amount in paisa
-            currency: 'INR',
-            receipt: savedOrder._id.toString()
-        };
-        const razorpayOrder = await razorpay.orders.create(options);
-
-        await session.commitTransaction();
-        session.endSession();
-
-        // Send response with order details and Razorpay order
-        res.status(201).json({
-            order: savedOrder,
-            razorpayOrder
-        });
-    } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        console.error("error--->>", error)
-        res.status(400).json({ error: error.message });
-    }
-};
-
-
-exports.updatePaymentStatus = async (req, res) => {
-
-    try {
-        // Extract required fields from the request body
-        const { orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature, vendors } = req.body;
-
-        // Ensure all required fields are present
-        if (!orderId || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
-            return res.status(400).json({ error: 'Missing required fields' });
-        }
-
-        // Find the order in the database using the orderId
-        const order = await Order.findById(orderId);
-
-        if (!order) {
-            return res.status(404).json({ error: 'Order not found' });
-        }
-
-        // Create a hmac object using the key_secret
-        const hmac = crypto.createHmac('sha256', razorpay.key_secret);
-
-        // Generate the expected signature
-        hmac.update(`${razorpay_order_id}|${razorpay_payment_id}`);
-        const generated_signature = hmac.digest('hex');
-
-        // Verify the signature
-        if (generated_signature === razorpay_signature) {
-            // Update the order status to reflect successful payment
-            order.isPaymentVerified = true;
-            order.paymentStatus = 'Paid';
-            order.razorpay_payment_id = razorpay_payment_id;
-            order.razorpay_order_id = razorpay_order_id;
-            order.razorpay_signature = razorpay_signature;
-
-            // Update product quantities and save the order to the database
-            for (const vendor of vendors) {
-                for (const productInfo of vendor.products) {
-                    const product = await Product.findById(productInfo.product).populate('variations');
-
-                    if (product) {
-                        // Update variations
-                        for (const orderedVariation of productInfo.variations) {
-                            const productVariation = product.variations.find(
-                                variation => variation._id.toString() === orderedVariation._id
-                            );
-
-                            if (productVariation) {
-                                productVariation.quantity -= orderedVariation.quantity;
-                                await productVariation.save();
-                            }
-                        }
-
-                        // Update parent product quantity
-                        const totalQuantity = product.variations.reduce((sum, variation) => sum + variation.quantity, 0);
-                        product.quantity = totalQuantity;
-                        await product.save();
-                    }
-                }
-            }
-
-        } else {
-            // Update the order status to reflect failed payment
-            order.isPaymentVerified = false;
-            order.paymentStatus = 'Unpaid';
-        }
-
-        // Save the updated order
-        const updatedOrder = await order.save();
-
-        // Notify Vendors if payment is verified
-        if (updatedOrder && updatedOrder.isPaymentVerified) {
-            try {
-                const io = req.app.get('io');
-                if (io) {
-                    for (const v of updatedOrder.vendors) {
-                        const vendorId = v.vendor.toString();
-                        const vendorDetails = await Vendor.findById(v.vendor);
-
-                        const alertData = {
-                            type: 'new_order',
-                            orderId: updatedOrder._id.toString(),
-                            shortId: updatedOrder.orderId,
-                            totalAmount: v.products.reduce((sum, p) => sum + (p.totalAmount || 0), 0),
-                            itemCount: v.products.reduce((sum, p) => sum + p.quantity, 0),
-                            productSummary: v.products.map(p => `${p.name} x${p.quantity}`).join(', '),
-                            customerName: updatedOrder.name || 'Customer',
-                            customerAddress: updatedOrder.shippingAddress?.addressLine1 || ''
-                        };
-
-                        console.log(`[SOCKET] Emitting new_order (PAID) to vendor: ${vendorId}`);
-                        io.to(vendorId).emit('new_order', alertData);
-
-                        if (vendorDetails && vendorDetails.deviceToken) {
-                            const fs = require('fs');
-                            fs.appendFileSync('fcm_debug.log', `\n[${new Date().toISOString()}] Order ${updatedOrder.orderId} (PAID): Sending to vendor ${vendorId}\n`);
-
-                            const pushTitle = "New Order Received! 🛎️";
-                            const pushBody = `You have a new PAID order #${updatedOrder.orderId}. Open to accept!`;
-                            const pushData = {
-                                type: 'new_order',
-                                orderId: updatedOrder._id.toString(),
-                                shortId: updatedOrder.orderId,
-                                totalAmount: alertData.totalAmount.toString(),
-                                itemCount: alertData.itemCount.toString(),
-                                productSummary: alertData.productSummary,
-                                customerName: alertData.customerName,
-                                customerAddress: alertData.customerAddress
-                            };
-                            sendPushNotification(vendorDetails.deviceToken, pushTitle, pushBody, pushData)
-                                .catch(err => console.error(`[PUSH] Vendor alert error (PAID):`, err.message));
-                        }
-                    }
-                }
-            } catch (notifErr) {
-                console.error("[NOTIF] updatePaymentStatus notification error:", notifErr);
-            }
-        }
-
-        res.status(200).json(updatedOrder);
-    } catch (error) {
-        console.log("error-->>", error)
-        res.status(400).json({ error: error.message });
-    }
-};
 
 exports.updatePaymentStatusManually = async (req, res) => {
     try {
@@ -626,7 +383,6 @@ exports.getOrdersByVendor = async (req, res) => {
                         orderStatus: "$vendors.orderStatus",
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
-                        razorpay_payment_id: "$razorpay_payment_id",
                         createdAt: "$createdAt",
                         is_new: "$is_new",
                         vendorPaymentStatus: "$vendorPaymentStatus",
@@ -656,7 +412,6 @@ exports.getOrdersByVendor = async (req, res) => {
                     driver: "$_id.driver",
                     isPaymentVerified: "$_id.isPaymentVerified",
                     paymentStatus: "$_id.paymentStatus",
-                    razorpay_payment_id: "$_id.razorpay_payment_id",
                     createdAt: "$_id.createdAt",
                     deliveredAt: "$_id.deliveredAt", // Added deliveredAt
                     is_new: "$_id.is_new",
@@ -752,7 +507,6 @@ exports.getRecentOrdersByVendor = async (req, res) => {
                         orderStatus: "$vendors.orderStatus",
                         isPaymentVerified: "$isPaymentVerified",
                         paymentStatus: "$paymentStatus",
-                        razorpay_payment_id: "$razorpay_payment_id",
                         createdAt: "$createdAt"
                     },
                     products: {
@@ -774,7 +528,6 @@ exports.getRecentOrdersByVendor = async (req, res) => {
                     shippingAddress: "$_id.shippingAddress",
                     isPaymentVerified: "$_id.isPaymentVerified",
                     paymentStatus: "$_id.paymentStatus",
-                    razorpay_payment_id: "$_id.razorpay_payment_id",
                     createdAt: "$_id.createdAt",
                     vendors: {
                         vendor: "$_id.vendor",

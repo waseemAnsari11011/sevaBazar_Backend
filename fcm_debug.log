@@ -3238,3 +3238,21 @@
 
 [2026-03-11T11:11:23.112Z] Attempting FCM to: cTKGYLm9Rj... Type: undefined (Critical: false)
 [2026-03-11T11:11:23.481Z] FCM Success: projects/sevabazar-5d3f6/messages/0:1773227483316267%b37b294ab37b294a
+
+[2026-10-12T14:26:37.498Z] Initializing Firebase Admin via path: /Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json
+[2026-10-12T14:26:37.499Z] Firebase Init CRITICAL ERROR: Failed to parse service account json file: Error: ENOENT: no such file or directory, open '/Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json'
+
+[2026-10-12T14:29:38.235Z] Initializing Firebase Admin via path: /Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json
+[2026-10-12T14:29:38.241Z] Firebase Init CRITICAL ERROR: Failed to parse service account json file: Error: ENOENT: no such file or directory, open '/Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json'
+
+[2026-10-15T15:47:24.259Z] Initializing Firebase Admin via path: /Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json
+[2026-10-15T15:47:24.262Z] Firebase Init CRITICAL ERROR: Failed to parse service account json file: Error: ENOENT: no such file or directory, open '/Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json'
+
+[2026-10-15T16:05:47.991Z] Initializing Firebase Admin via path: /Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json
+[2026-10-15T16:05:47.992Z] Firebase Init CRITICAL ERROR: Failed to parse service account json file: Error: ENOENT: no such file or directory, open '/Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json'
+
+[2026-10-18T12:52:37.222Z] Initializing Firebase Admin via path: /Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json
+[2026-10-18T12:52:37.223Z] Firebase Init CRITICAL ERROR: Failed to parse service account json file: Error: ENOENT: no such file or directory, open '/Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json'
+
+[2026-10-19T14:13:56.548Z] Initializing Firebase Admin via path: /Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json
+[2026-10-19T14:13:56.549Z] Firebase Init CRITICAL ERROR: Failed to parse service account json file: Error: ENOENT: no such file or directory, open '/Users/waseem/Desktop/projects/mobile/multiVendor/SevaBazar/sevaBazar_Backend/firebaseConfig.json'

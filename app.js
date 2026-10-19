@@ -38,7 +38,7 @@ app.use(
     allowedHeaders: "Content-Type,Authorization",
   })
 );
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8000;
 
 // Middleware to parse JSON bodies with increased limit
 // Middleware to parse JSON bodies with increased limit
@@ -46,17 +46,14 @@ app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 // Serve static files from the 'build' directory of the frontend
-app.use(express.static(path.join(__dirname, "..", "sevabazar_panel", "build")));
+app.use(express.static(path.join(__dirname, "..", "sevaBazar_panel", "build")));
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // MongoDB connection
 const mongoUri = `mongodb+srv://${process.env.MONGO_USERNAME}:${process.env.MONGO_PASSWORD}@${process.env.MONGO_HOST}/${process.env.DB_NAME}?retryWrites=true&w=majority`;
 mongoose
-  .connect(mongoUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
+  .connect(mongoUri)
   .then(() => {
     console.log("Connected to MongoDB:", mongoUri.replace(process.env.MONGO_PASSWORD, '****'));
 
@@ -102,7 +99,7 @@ console.log("Ticket Routes Registered");
 // For any other route, serve the index.html file
 app.get("*", (req, res) => {
   console.log("404 Hit: ", req.originalUrl); // Log the URL that caused the fall-through
-  const indexPath = path.join(__dirname, "..", "sevabazar_panel", "build", "index.html");
+  const indexPath = path.join(__dirname, "..", "sevaBazar_panel", "build", "index.html");
 
   const fs = require('fs'); // Ensure fs is available
   if (fs.existsSync(indexPath)) {

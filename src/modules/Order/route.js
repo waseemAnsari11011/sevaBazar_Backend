@@ -4,8 +4,6 @@ const orderController = require('../Order/controller');  // Adjust the path acco
 
 // Create a new order
 router.post('/order', orderController.createOrder);
-router.post('/razorpay', orderController.createOrderRazorpay);
-router.post('/razorpay-verify-payment', orderController.updatePaymentStatus);
 router.post('/manually-verify-payment', orderController.updatePaymentStatusManually);
 router.put('/admin-update-payment-status/:orderId', orderController.adminUpdatePaymentStatus);
 
